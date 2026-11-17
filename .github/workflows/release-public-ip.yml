@@ -2,6 +2,11 @@ name: Publish public IP build
 
 on:
   workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: 'Reuse the installer and Docker bundle from a completed build run'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -17,7 +22,7 @@ env:
 
 jobs:
   windows:
-    if: github.repository == 'FXDYJ/ExamAware2' && github.ref == 'refs/heads/public-ip'
+    if: github.repository == 'FXDYJ/ExamAware2' && github.ref == 'refs/heads/public-ip' && !inputs.build_run_id
     runs-on: windows-latest
     env:
       ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/v
@@ -57,7 +62,7 @@ jobs:
           if-no-files-found: error
 
   control:
-    if: github.repository == 'FXDYJ/ExamAware2' && github.ref == 'refs/heads/public-ip'
+    if: github.repository == 'FXDYJ/ExamAware2' && github.ref == 'refs/heads/public-ip' && !inputs.build_run_id
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -156,25 +161,50 @@ jobs:
 
   release:
     needs: [windows, control]
+    if: >-
+      !cancelled() && github.repository == 'FXDYJ/ExamAware2' && github.ref == 'refs/heads/public-ip'
+      && (inputs.build_run_id || (needs.windows.result == 'success' && needs.control.result == 'success'))
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
     steps:
+      - name: Verify source run
+        id: source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: |
+          if [ -z "$BUILD_RUN_ID" ]; then
+            echo "commit=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          else
+            [[ "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]
+            gh run view "$BUILD_RUN_ID" --repo "$GITHUB_REPOSITORY" --json headSha,headBranch,workflowName,jobs |
+              jq -er 'select(.headBranch == "public-ip" and .workflowName == "Publish public IP build") |
+                select(([.jobs[] | select((.name == "windows" or .name == "control") and .conclusion == "success")] | length) == 2) |
+                "commit=" + .headSha' >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/download-artifact@v4
         with:
           name: docker-installer
           path: release
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.build_run_id || github.run_id }}
       - uses: actions/download-artifact@v4
         with:
           name: windows-installer
           path: release
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.build_run_id || github.run_id }}
       - name: Publish release and checksums
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD_COMMIT: ${{ steps.source.outputs.commit }}
         run: |
           cd release
           sha256sum install.sh examaware-control-docker-*.tar.gz *.exe > SHA256SUMS
           sha256sum -c SHA256SUMS
-          gh release create "$CONTROL_VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+          gh release create "$CONTROL_VERSION" --repo "$GITHUB_REPOSITORY" --target "$BUILD_COMMIT" \
             --title "$CONTROL_VERSION 公网 IP 直连版" --notes 'Windows 安装包与集控 Docker 版。部署命令见仓库 README。' \
             install.sh examaware-control-docker-*.tar.gz *.exe SHA256SUMS
