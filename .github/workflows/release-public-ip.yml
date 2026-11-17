@@ -1,8 +1,6 @@
 name: Publish public IP build
 
 on:
-  push:
-    branches: [public-ip]
   workflow_dispatch:
 
 permissions:
@@ -164,8 +162,12 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          name: docker-installer
           path: release
-          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: release
       - name: Publish release and checksums
         env:
           GH_TOKEN: ${{ github.token }}
