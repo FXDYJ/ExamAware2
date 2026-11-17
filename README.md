@@ -2,6 +2,22 @@
 
 一款易用、跨平台的大屏考试信息展示工具.
 
+## 公网 IP 直连版
+
+从 [此 fork 的发布页](https://github.com/FXDYJ/ExamAware2/releases/tag/control-v0.1.3) 下载 `ExamAware-1.6.1-public-ip-setup.exe`。
+在已安装 Docker Engine 和 Docker Compose 插件的 Linux 服务器上运行以下命令。
+将 `192.0.2.10` 替换为服务器的公网 IP。
+
+```bash
+curl -fsSL https://github.com/FXDYJ/ExamAware2/releases/download/control-v0.1.3/install.sh -o /tmp/examaware-control-install.sh && \
+  EXAMAWARE_NONINTERACTIVE=1 BETTER_AUTH_URL=http://192.0.2.10:8219 HTTP_PORT=8219 \
+  bash /tmp/examaware-control-install.sh control-v0.1.3
+```
+
+在服务器防火墙和云安全组放行 `8219/TCP`。安装结束后会显示自动生成的管理员密码。
+浏览器和客户端「学校集控」都填写同一个 `http://公网IP:8219`，IPv6 用方括号包住地址。
+HTTP 会明文传输凭据。部署配置保存在 `/opt/examaware-control/.env`，PostgreSQL 数据保存在 Docker 命名卷。
+
 ![1764471277655](image/README/1764471277655.png)
 
 ![1764471408023](image/README/1764471408023.png)

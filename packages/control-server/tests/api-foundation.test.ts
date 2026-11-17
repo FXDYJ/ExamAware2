@@ -5,6 +5,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { API_VERSION, configureApplication } from '../src/api/application.js';
 import { RequestOrigin } from '../src/api/request-context.js';
+import { readEnvironment } from '../src/config/env.js';
 import type { INestApplication } from '@nestjs/common';
 
 @AllowAnonymous()
@@ -77,3 +78,16 @@ describe('REST application contract', () => {
     expect(proxyResponse.body).toEqual({ origin: 'https://control.example.edu' });
   });
 });
+
+it.each(['http://192.0.2.10:8219', 'http://[2001:db8::10]:8219'])(
+  'uses the configured production IP origin %s for device URLs',
+  (url) => {
+    const env = readEnvironment({
+      NODE_ENV: 'production',
+      BETTER_AUTH_URL: `${url}/`,
+      BETTER_AUTH_SECRET: 'test-only-auth-secret',
+      DEVICE_CREDENTIAL_PEPPER: 'test-only-device-pepper'
+    });
+    expect(env.devicePublicOrigin).toBe(url);
+  }
+);

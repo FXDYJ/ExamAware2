@@ -33,7 +33,7 @@ describe('ControlCredentialStore', () => {
     await rm(directory, { recursive: true, force: true })
   })
 
-  it('persists only the safeStorage-encrypted credential and restores it', async () => {
+  it('persists only the encrypted credential and restores a public IP binding', async () => {
     const safeStorage = {
       isEncryptionAvailable: () => true,
       encryptString: (value: string) => Buffer.from(`encrypted:${value}`, 'utf8'),
@@ -42,11 +42,16 @@ describe('ControlCredentialStore', () => {
     const filePath = path.join(directory, 'control-device.json')
     const store = new ControlCredentialStore(filePath, safeStorage)
 
-    await store.save(registration())
+    const publicRegistration = {
+      ...registration(),
+      serverUrl: 'http://192.0.2.10:8219/',
+      websocketUrl: 'ws://192.0.2.10:8219/device/v1/connect'
+    }
+    await store.save(publicRegistration)
 
     const storedText = await readFile(filePath, 'utf8')
     expect(storedText).not.toContain(credential)
-    await expect(store.load()).resolves.toEqual(registration())
+    await expect(store.load()).resolves.toEqual(publicRegistration)
   })
 
   it('refuses to persist a credential without operating-system encryption', async () => {
@@ -63,31 +68,34 @@ describe('ControlCredentialStore', () => {
 })
 
 describe('ControlApiClient', () => {
-  it('exchanges a validated enrollment code without following redirects', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      Response.json({
-        deviceId,
-        credential,
-        websocketUrl: 'ws://192.168.10.20:3100/device/v1/connect',
-        protocolVersion: CONTROL_PROTOCOL_VERSION
-      })
-    )
-    const client = new ControlApiClient(fetchImpl as typeof fetch)
+  it.each(['192.168.10.20:3100', '192.0.2.10:8219', '[2001:db8::10]:8219'])(
+    'enrolls over HTTP and WS at %s without following redirects',
+    async (host) => {
+      const fetchImpl = vi.fn().mockResolvedValue(
+        Response.json({
+          deviceId,
+          credential,
+          websocketUrl: `ws://${host}/device/v1/connect`,
+          protocolVersion: CONTROL_PROTOCOL_VERSION
+        })
+      )
+      const client = new ControlApiClient(fetchImpl as typeof fetch)
 
-    await expect(
-      client.enroll('http://192.168.10.20:3100', 'EA2-0123456789abcdef', {
-        displayName: 'Room 101',
-        platform: 'darwin',
-        architecture: 'arm64',
-        appVersion: '1.4.4',
-        protocolVersion: CONTROL_PROTOCOL_VERSION
-      })
-    ).resolves.toMatchObject({ deviceId, credential, serverUrl: 'http://192.168.10.20:3100/' })
-    expect(fetchImpl).toHaveBeenCalledWith(
-      new URL('http://192.168.10.20:3100/api/v1/device-enrollments'),
-      expect.objectContaining({ method: 'POST', redirect: 'error' })
-    )
-  })
+      await expect(
+        client.enroll(`http://${host}`, 'EA2-0123456789abcdef', {
+          displayName: 'Room 101',
+          platform: 'darwin',
+          architecture: 'arm64',
+          appVersion: '1.4.4',
+          protocolVersion: CONTROL_PROTOCOL_VERSION
+        })
+      ).resolves.toMatchObject({ deviceId, credential, serverUrl: `http://${host}/` })
+      expect(fetchImpl).toHaveBeenCalledWith(
+        new URL(`http://${host}/api/v1/device-enrollments`),
+        expect.objectContaining({ method: 'POST', redirect: 'error' })
+      )
+    }
+  )
 
   it('authenticates bounded device error reports with the device credential', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(Response.json({ id: 'reported' }))
@@ -175,8 +183,8 @@ describe('ControlApiClient', () => {
     )
   })
 
-  it.each(['http://control.example.edu', 'http://localhost:3100', 'http://8.8.8.8:3100'])(
-    'rejects plaintext domain or public server %s before sending credentials',
+  it.each(['http://control.example.edu', 'http://localhost:3100'])(
+    'rejects the plaintext hostname %s before sending credentials',
     async (serverUrl) => {
       const fetchImpl = vi.fn()
       const client = new ControlApiClient(fetchImpl as typeof fetch)
@@ -193,6 +201,34 @@ describe('ControlApiClient', () => {
       expect(fetchImpl).not.toHaveBeenCalled()
     }
   )
+
+  it.each([
+    ['http://192.0.2.10:8219', 'ws://192.0.2.11:8219/device/v1/connect'],
+    ['http://192.0.2.10:8219', 'ws://192.0.2.10:3100/device/v1/connect'],
+    ['https://192.0.2.10:8219', 'ws://192.0.2.10:8219/device/v1/connect']
+  ])('rejects a mismatched or downgraded WS URL for %s', async (serverUrl, websocketUrl) => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({
+          deviceId,
+          credential,
+          websocketUrl,
+          protocolVersion: CONTROL_PROTOCOL_VERSION
+        })
+      )
+    const client = new ControlApiClient(fetchImpl as typeof fetch)
+
+    await expect(
+      client.enroll(serverUrl, 'EA2-0123456789abcdef', {
+        displayName: 'Room 101',
+        platform: 'win32',
+        architecture: 'x64',
+        appVersion: '1.6.1',
+        protocolVersion: CONTROL_PROTOCOL_VERSION
+      })
+    ).rejects.toMatchObject({ code: 'insecure_websocket_url' })
+  })
 
   it('preserves stable Problem Details codes from the server', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(

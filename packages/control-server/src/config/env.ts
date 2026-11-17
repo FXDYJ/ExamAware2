@@ -1,3 +1,5 @@
+import { isIP } from 'node:net';
+
 const DEVELOPMENT_DATABASE_URL = 'postgres://examaware:examaware@127.0.0.1:5432/examaware_control';
 const DEVELOPMENT_AUTH_SECRET = 'examaware-control-development-secret';
 const DEVELOPMENT_DEVICE_CREDENTIAL_PEPPER = 'examaware-device-development-pepper';
@@ -82,11 +84,19 @@ function readTrustedOrigins(
 export function readEnvironment(source: NodeJS.ProcessEnv) {
   const nodeEnv = source.NODE_ENV ?? 'development';
   const betterAuthUrl = source.BETTER_AUTH_URL ?? 'http://localhost:3100';
+  const publicUrl = new URL(betterAuthUrl);
+  const devicePublicOrigin =
+    nodeEnv === 'production' &&
+    publicUrl.protocol === 'http:' &&
+    isIP(publicUrl.hostname.replace(/^\[|\]$/g, ''))
+      ? publicUrl.origin
+      : undefined;
   return Object.freeze({
     nodeEnv,
     port: readPort(source.CONTROL_SERVER_PORT),
     databaseUrl: source.DATABASE_URL ?? DEVELOPMENT_DATABASE_URL,
     betterAuthUrl,
+    devicePublicOrigin,
     betterAuthSecret: readAuthSecret(nodeEnv, source),
     deviceCredentialPepper: readDeviceCredentialPepper(nodeEnv, source),
     api: Object.freeze({

@@ -48,11 +48,11 @@ export function normalizeControlServerUrl(input: string): string {
   }
   if (
     url.protocol !== 'https:' &&
-    !(url.protocol === 'http:' && isPrivateOrLocalIpAddress(url.hostname))
+    !(url.protocol === 'http:' && isIP(url.hostname.replace(/^\[|\]$/g, '')))
   ) {
     throw new ControlAgentError(
       'insecure_server_url',
-      '集控服务器域名或公网 IP 必须使用 HTTPS；本机或内网 IP 允许 HTTP',
+      '集控服务器域名必须使用 HTTPS；IP 地址允许使用 HTTP',
       { protocol: url.protocol, hostname: url.hostname }
     )
   }
@@ -63,7 +63,7 @@ export function normalizeControlServerUrl(input: string): string {
   return url.toString()
 }
 
-export function validateControlWebSocketUrl(input: string): string {
+export function validateControlWebSocketUrl(input: string, serverUrl: string): string {
   let url: URL
   try {
     url = new URL(input)
@@ -78,34 +78,23 @@ export function validateControlWebSocketUrl(input: string): string {
   if (url.username || url.password) {
     throw new ControlAgentError('invalid_websocket_url', '集控 WebSocket 地址不得包含内嵌凭据')
   }
-  if (
-    url.protocol !== 'wss:' &&
-    !(url.protocol === 'ws:' && isPrivateOrLocalIpAddress(url.hostname))
-  ) {
+  if (url.protocol === 'wss:') return url.toString()
+
+  const server = new URL(normalizeControlServerUrl(serverUrl))
+  if (url.protocol !== 'ws:' || server.protocol !== 'http:') {
     throw new ControlAgentError(
       'insecure_websocket_url',
-      '集控连接的域名或公网 IP 必须使用 WSS；本机或内网 IP 允许 WS',
+      'HTTPS 集控服务器需要使用 WSS；仅 HTTP 集控服务器允许使用 WS',
       { protocol: url.protocol, hostname: url.hostname }
     )
   }
-  return url.toString()
-}
 
-function isPrivateOrLocalIpAddress(hostname: string) {
-  const address = hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  const family = isIP(address)
-  if (family === 0) return false
-  if (family === 6) {
-    if (address === '::1' || address === '::') return true
-    const firstSegment = Number.parseInt(address.split(':', 1)[0], 16)
-    return (firstSegment & 0xfe00) === 0xfc00 || (firstSegment & 0xffc0) === 0xfe80
+  server.protocol = 'ws:'
+  if (url.origin !== server.origin) {
+    throw new ControlAgentError(
+      'insecure_websocket_url',
+      'WS 地址必须与已绑定的 HTTP 服务器使用相同的 IP 和端口'
+    )
   }
-  const parts = address.split('.').map(Number)
-  return (
-    parts[0] === 10 ||
-    parts[0] === 127 ||
-    (parts[0] === 169 && parts[1] === 254) ||
-    (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
-    (parts[0] === 192 && parts[1] === 168)
-  )
+  return url.toString()
 }

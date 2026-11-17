@@ -119,12 +119,13 @@ export class ControlCredentialStore {
       websocketUrl: registration.websocketUrl,
       protocolVersion: registration.protocolVersion
     })
+    const serverUrl = normalizeControlServerUrl(registration.serverUrl)
     const stored: StoredControlRegistration = {
       version: CONTROL_CREDENTIAL_FILE_VERSION,
-      serverUrl: normalizeControlServerUrl(registration.serverUrl),
+      serverUrl,
       deviceId: parsed.deviceId,
       encryptedCredential: this.safeStorage.encryptString(parsed.credential).toString('base64'),
-      websocketUrl: validateControlWebSocketUrl(parsed.websocketUrl),
+      websocketUrl: validateControlWebSocketUrl(parsed.websocketUrl, serverUrl),
       protocolVersion: parsed.protocolVersion,
       enrolledAt: parseIsoDate(registration.enrolledAt, 'enrolledAt')
     }
@@ -229,18 +230,19 @@ export class ControlCredentialStore {
 
   private registrationFromStored(stored: StoredControlRegistration): ControlRegistration {
     this.assertEncryptionAvailable()
+    const serverUrl = normalizeControlServerUrl(stored.serverUrl)
     const credential = this.safeStorage.decryptString(
       Buffer.from(stored.encryptedCredential, 'base64')
     )
     const response = enrollDeviceResponseSchema.parse({
       deviceId: stored.deviceId,
       credential,
-      websocketUrl: validateControlWebSocketUrl(stored.websocketUrl),
+      websocketUrl: validateControlWebSocketUrl(stored.websocketUrl, serverUrl),
       protocolVersion: stored.protocolVersion
     })
     return {
       ...response,
-      serverUrl: normalizeControlServerUrl(stored.serverUrl),
+      serverUrl,
       enrolledAt: parseIsoDate(stored.enrolledAt, 'enrolledAt')
     }
   }

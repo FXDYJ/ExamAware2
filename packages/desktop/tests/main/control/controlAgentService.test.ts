@@ -53,10 +53,10 @@ class FakeControlSocket extends EventEmitter implements ControlSocket {
 
 function registration(): ControlRegistration {
   return {
-    serverUrl: 'http://127.0.0.1:3100/',
+    serverUrl: 'http://192.0.2.10:8219/',
     deviceId,
     credential: 'a'.repeat(48),
-    websocketUrl: 'ws://127.0.0.1:3100/device/v1/connect',
+    websocketUrl: 'ws://192.0.2.10:8219/device/v1/connect',
     protocolVersion: CONTROL_PROTOCOL_VERSION,
     enrolledAt: '2026-08-04T09:00:00.000Z'
   }
@@ -81,7 +81,8 @@ function createService(
       reportError: vi.fn(),
       callProctor
     },
-    createSocket: (_url, options) => {
+    createSocket: (url, options) => {
+      expect(url).toBe(registration().websocketUrl)
       expect(options).toEqual({
         maxPayload: CONTROL_MAX_MESSAGE_SIZE_BYTES,
         perMessageDeflate: false,

@@ -88,6 +88,14 @@ bash /tmp/examaware-control-install.sh
 
 `BETTER_AUTH_URL` 必须是没有 path、query 或 fragment 的精确 HTTP(S) origin。非交互模式无法识别外部地址且未设置该变量时会在下载前退出。
 
+### 公网 IP 与端口直连
+
+无域名模式可将 `BETTER_AUTH_URL` 设为 `http://公网IP:端口`，并将 `HTTP_PORT` 设为同一端口。第一个示例中的 `192.0.2.10` 是占位地址，部署时替换为考场可访问的公网 IP。IPv6 地址使用方括号，例如 `http://[2001:db8::10]:8219`。
+
+在支持公网 IP 直连的桌面端「学校集控」中填写同一个完整地址。生产服务使用此地址生成设备 WebSocket 和考试档案下载地址，客户端使用同一 IP 和端口建立 HTTP 与 WebSocket 连接。
+
+HTTP 直连会明文传输后台登录信息、设备凭据和考试档案。在公网需要加密时，可使用下方的 HTTPS 部署方式。
+
 ### 域名与自动 HTTPS
 
 域名必须已解析到服务器，且不能包含 scheme、路径或端口：

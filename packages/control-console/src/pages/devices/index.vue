@@ -200,6 +200,7 @@ import type {
   RotatedDeviceCredential
 } from '@/api/control/types';
 import { ApiError } from '@/api/http';
+import { copyText } from '@/utils/clipboard';
 import { useSessionStore } from '@/store';
 import { createDefaultDeviceFilters, filterDevices } from '@/utils/device-filters';
 import {
@@ -447,9 +448,11 @@ async function deleteDevice(device: DeviceView) {
   );
 }
 async function copyCredential() {
-  if (rotatedCredential.value) {
-    await navigator.clipboard.writeText(rotatedCredential.value.credential);
+  if (!rotatedCredential.value) return;
+  if (await copyText(rotatedCredential.value.credential)) {
     await MessagePlugin.success('凭证已复制');
+  } else {
+    await MessagePlugin.error('复制失败，请手动选中并复制凭证');
   }
 }
 watch(

@@ -50,7 +50,7 @@ export class ControlApiClient {
       const enrollment = enrollDeviceResponseSchema.parse(response) as EnrollDeviceResponse
       return {
         ...enrollment,
-        websocketUrl: validateControlWebSocketUrl(enrollment.websocketUrl),
+        websocketUrl: validateControlWebSocketUrl(enrollment.websocketUrl, normalizedServerUrl),
         serverUrl: normalizedServerUrl,
         enrolledAt: new Date().toISOString()
       }

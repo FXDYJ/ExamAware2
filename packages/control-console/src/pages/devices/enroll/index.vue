@@ -153,6 +153,7 @@ import type {
   PartitionDimensionDetail
 } from '@/api/control/types';
 import { ApiError } from '@/api/http';
+import { copyText } from '@/utils/clipboard';
 import {
   WIDE_CASCADER_POPUP_PROPS,
   buildPartitionCascaderOptions,
@@ -229,9 +230,11 @@ async function createCode(context: SubmitContext) {
   }
 }
 async function copyCode() {
-  if (created.value) {
-    await navigator.clipboard.writeText(created.value.code);
+  if (!created.value) return;
+  if (await copyText(created.value.code)) {
     await MessagePlugin.success('注册码已复制');
+  } else {
+    await MessagePlugin.error('复制失败，请手动选中并复制注册码');
   }
 }
 async function checkDevices() {

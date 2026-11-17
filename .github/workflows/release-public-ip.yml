@@ -1,0 +1,178 @@
+name: Publish public IP build
+
+on:
+  push:
+    branches: [public-ip]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-ip-release
+  cancel-in-progress: false
+
+env:
+  CONTROL_VERSION: control-v0.1.3
+  PNPM_YES: 'true'
+  HUSKY: '0'
+
+jobs:
+  windows:
+    if: github.repository == 'FXDYJ/ExamAware2' && github.ref == 'refs/heads/public-ip'
+    runs-on: windows-latest
+    env:
+      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/v
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          standalone: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: |
+          git config --global url."https://github.com/".insteadOf git@github.com:
+      - run: pnpm install --frozen-lockfile
+      - name: Build workspace dependencies
+        shell: bash
+        run: |
+          pnpm rpc:build
+          pnpm core:build
+          pnpm player:build
+          pnpm --filter @dsz-examaware/plugin-sdk build
+          pnpm control:protocol:build
+      - name: Build Windows installer
+        run: pnpm desktop:build:win
+      - name: Name fork installer
+        shell: pwsh
+        run: |
+          $version = (Get-Content 'packages/desktop/package.json' -Raw | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Path out/release -Force | Out-Null
+          Copy-Item "packages/desktop/out/ExamAware-$version-setup.exe" "out/release/ExamAware-$version-public-ip-setup.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: out/release/*.exe
+          if-no-files-found: error
+
+  control:
+    if: github.repository == 'FXDYJ/ExamAware2' && github.ref == 'refs/heads/public-ip'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: |
+          git config --global url."https://github.com/".insteadOf git@github.com:
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Test and build control center
+        run: |
+          bash deploy/tests/install.test.sh
+          pnpm control:build
+          pnpm exec vitest run packages/control-server/tests packages/control-protocol/tests packages/desktop/tests/main/control
+        env:
+          ELECTRON_OVERRIDE_DIST_PATH: /tmp
+      - name: Prepare upstream container build contexts
+        run: |
+          mkdir -p out/server/packages/{core,control-protocol,control-server} out/server/scripts out/console/dist
+          for package in core control-protocol control-server; do
+            cp -a "packages/$package/package.json" "packages/$package/dist" "out/server/packages/$package/"
+          done
+          cp -a packages/control-server/drizzle out/server/packages/control-server/
+          cp pnpm-lock.yaml pnpm-workspace.yaml out/server/
+          node -e 'const p = require("./package.json"); delete p.scripts; require("node:fs").writeFileSync("out/server/package.json", JSON.stringify(p))'
+          (cd out/server && pnpm install --prod --frozen-lockfile)
+          test -f out/server/packages/control-server/node_modules/@dsz-examaware/core/dist/index.mjs
+          install -m 755 deploy/scripts/prestart.sh out/server/scripts/prestart.sh
+          cp deploy/docker/server/Dockerfile out/server/
+          cp deploy/docker/console/Dockerfile out/console/
+          cp deploy/Caddyfile.docker out/console/Caddyfile
+          cp -a packages/control-console/dist/. out/console/dist/
+      - name: Prepare Docker install bundle
+        run: |
+          mkdir -p out/docker out/release
+          sed "s|^readonly REPOSITORY=.*|readonly REPOSITORY=\"$GITHUB_REPOSITORY\"|" deploy/install.sh > out/docker/install.sh
+          sed 's|/examaware/control-|/fxdyj/examaware-control-|g' deploy/compose.yml > out/docker/compose.yml
+          cp deploy/{backup.sh,Caddyfile.docker,.env.example} out/docker/
+          chmod 755 out/docker/{install.sh,backup.sh}
+          cp out/docker/install.sh out/release/install.sh
+          bash -n out/release/install.sh
+          tar czf "out/release/examaware-control-docker-$CONTROL_VERSION.tar.gz" -C out/docker .
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish server image
+        uses: docker/build-push-action@v6
+        with:
+          context: out/server
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/fxdyj/examaware-control-server:${{ env.CONTROL_VERSION }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+      - name: Publish console image
+        uses: docker/build-push-action@v6
+        with:
+          context: out/console
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/fxdyj/examaware-control-console:${{ env.CONTROL_VERSION }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+      - name: Smoke test published images with Compose
+        env:
+          COMPOSE_PROJECT_NAME: examaware-public-ip-ci
+          BETTER_AUTH_URL: http://127.0.0.1:18219
+          HTTP_PORT: '18219'
+          SITE_ADDRESS: ':80'
+          POSTGRES_IMAGE: postgres:17-alpine
+          CONTROL_REGISTRY: ghcr.io
+        run: |
+          export POSTGRES_PASSWORD=$(openssl rand -hex 16)
+          export BETTER_AUTH_SECRET=$(openssl rand -hex 32)
+          export DEVICE_CREDENTIAL_PEPPER=$(openssl rand -hex 32)
+          export CONTROL_ADMIN_PASSWORD=$(openssl rand -hex 16)
+          sed -i "/^      - '443:443'$/d" out/docker/compose.yml
+          compose() { docker compose -f out/docker/compose.yml "$@"; }
+          trap 'compose down --volumes' EXIT
+          if ! compose up -d --wait --wait-timeout 120; then compose logs; exit 1; fi
+          curl --retry 10 --retry-all-errors --retry-delay 1 -fsS "$BETTER_AUTH_URL/api/health/ready" | grep '"database":"ok"'
+          curl -fsS "$BETTER_AUTH_URL/" | grep '<title>'
+          curl -fsS "$BETTER_AUTH_URL/api/auth/sign-in/username" -H "Origin: $BETTER_AUTH_URL" \
+            -H 'Content-Type: application/json' -d "{\"username\":\"admin\",\"password\":\"$CONTROL_ADMIN_PASSWORD\"}" >/dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-installer
+          path: out/release/*
+          if-no-files-found: error
+
+  release:
+    needs: [windows, control]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Publish release and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd release
+          sha256sum install.sh examaware-control-docker-*.tar.gz *.exe > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          gh release create "$CONTROL_VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$CONTROL_VERSION 公网 IP 直连版" --notes 'Windows 安装包与集控 Docker 版。部署命令见仓库 README。' \
+            install.sh examaware-control-docker-*.tar.gz *.exe SHA256SUMS

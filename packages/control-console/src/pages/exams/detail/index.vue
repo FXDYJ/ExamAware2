@@ -393,6 +393,7 @@ import type {
   PublicExamLinkResponse
 } from '@/api/control/types';
 import { ApiError } from '@/api/http';
+import { copyText } from '@/utils/clipboard';
 import { useSessionStore } from '@/store';
 import { createDefaultDeviceFilters, filterDevices } from '@/utils/device-filters';
 import {
@@ -589,10 +590,9 @@ async function generatePublicLink() {
 
 async function copyPublicLink() {
   if (!publicLink.value) return;
-  try {
-    await navigator.clipboard.writeText(publicLink.value.url);
+  if (await copyText(publicLink.value.url)) {
     await MessagePlugin.success('链接已复制');
-  } catch {
+  } else {
     await MessagePlugin.error('复制失败，请手动复制链接');
   }
 }

@@ -10,7 +10,11 @@
         </t-steps>
 
         <t-form v-if="currentStep === 0" ref="serverForm" :data="form" :rules="serverRules">
-          <t-form-item label="服务器地址" name="serverUrl">
+          <t-form-item
+            label="服务器地址"
+            name="serverUrl"
+            help="公网 IP 可填写 http://IP:端口。HTTP 会明文传输，域名请使用 HTTPS。"
+          >
             <t-input v-model="form.serverUrl" placeholder="https://control.example.edu" autofocus />
           </t-form-item>
           <div class="wizard-actions">

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { BadRequestException, createParamDecorator, ExecutionContext } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
+import { env } from '../config/env.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -26,6 +27,7 @@ export const RequestId = createParamDecorator(
 );
 
 export const RequestOrigin = createParamDecorator((_data: unknown, context: ExecutionContext) => {
+  if (env.devicePublicOrigin) return env.devicePublicOrigin;
   const request = context.switchToHttp().getRequest<ApiRequest>();
   const forwardedProtocol = request.header('x-forwarded-proto')?.split(',')[0]?.trim();
   const forwardedHost = request.header('x-forwarded-host')?.split(',')[0]?.trim();

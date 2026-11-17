@@ -285,7 +285,10 @@ export class ControlAgentService {
     if (!this.started || !this.registration || this.socket) return
     let websocketUrl: string
     try {
-      websocketUrl = validateControlWebSocketUrl(this.registration.websocketUrl)
+      websocketUrl = validateControlWebSocketUrl(
+        this.registration.websocketUrl,
+        this.registration.serverUrl
+      )
     } catch (error) {
       this.updateSnapshot('incompatible', ControlAgentError.from(error))
       return
