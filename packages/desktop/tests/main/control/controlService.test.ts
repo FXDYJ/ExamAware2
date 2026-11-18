@@ -62,6 +62,10 @@ vi.mock('../../../src/main/control/managedControlStore', () => ({
 }))
 
 import { ControlService } from '../../../src/main/control/controlService'
+import {
+  loadOfflineDeployments,
+  saveOfflineDeployments
+} from '../../../src/main/control/offlinePlaybackStore'
 
 const deploymentId = '43408313-512f-4e86-a91b-0a5f58b7ee3e'
 const examConfigId = 'b3df3de8-2da0-4a62-8c4f-2ac4570946a4'
@@ -324,6 +328,48 @@ describe('ControlService', () => {
         }
       })
     ).rejects.toMatchObject({ code: 'deployment_stopped' })
+    expect(state.start).not.toHaveBeenCalled()
+  })
+
+  it('removes an offline plan cancelled during cache recovery so it cannot return after restart', async () => {
+    let finishLoad!: (value: never[]) => void
+    vi.mocked(loadOfflineDeployments).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishLoad = resolve
+        })
+    )
+    const bytes = new TextEncoder().encode(JSON.stringify(examConfig))
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    const agent = { getRegistration: () => registration, onChanged: vi.fn(() => () => {}) }
+    const service = new ControlService()
+    service.attach(
+      agent as never,
+      { downloadArtifact: vi.fn(async () => ({ bytes, sha256 })) } as never
+    )
+    const pending = service.prepareDeployment({
+      deploymentId,
+      examConfigId,
+      examConfigVersionId,
+      artifact: {
+        url: 'http://127.0.0.1:3100/exam',
+        mediaType: EXAM_CONFIG_ARTIFACT_MEDIA_TYPE,
+        sizeBytes: bytes.byteLength,
+        sha256,
+        expiresAt: '2030-01-01T00:01:00Z'
+      },
+      automation: {
+        startAt: '2030-01-01T00:00:10Z',
+        stopAt: '2030-01-01T00:01:00Z',
+        latestStartAt: '2030-01-01T00:00:40Z'
+      }
+    })
+    await vi.waitFor(() => expect(finishLoad).toBeTypeOf('function'))
+    await service.stopDeployment({ deploymentId })
+    finishLoad([])
+    await expect(pending).rejects.toMatchObject({ code: 'deployment_stopped' })
+    expect(saveOfflineDeployments).toHaveBeenLastCalledWith([])
+    expect(service.getDevicePlayerState()?.status).toBe('idle')
     expect(state.start).not.toHaveBeenCalled()
   })
 

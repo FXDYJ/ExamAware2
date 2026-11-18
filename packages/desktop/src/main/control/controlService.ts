@@ -343,7 +343,10 @@ export class ControlService {
       validation.config,
       `${registration.serverUrl}|${registration.deviceId}`
     )
-    this.assertDeploymentNotStopped(payload.deploymentId)
+    if (this.stoppedDeployments.has(payload.deploymentId)) {
+      await this.offline.forget(payload.deploymentId)
+      this.assertDeploymentNotStopped(payload.deploymentId)
+    }
     if (this.bindingKey() !== `${registration.serverUrl}|${registration.deviceId}`) {
       throw new ControlAgentError('device_binding_changed', '保存过程中设备绑定发生变化')
     }

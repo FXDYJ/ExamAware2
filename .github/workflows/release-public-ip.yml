@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CONTROL_VERSION: control-v0.1.5
+  CONTROL_VERSION: control-v0.1.6
   PNPM_YES: 'true'
   HUSKY: '0'
 

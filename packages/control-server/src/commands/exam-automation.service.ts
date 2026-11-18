@@ -134,7 +134,7 @@ export class ExamAutomationService implements OnApplicationBootstrap, OnModuleDe
         )
       )
         issues.push('未确认支持考试下发');
-      if (plan?.offlinePlayback && !supportsOffline) issues.push('离线执行需要 1.6.3 或更新客户端');
+      if (plan?.offlinePlayback && !supportsOffline) issues.push('离线执行需要 1.6.4 或更新客户端');
       const timeSync = device?.lastReportedState?.timeSync;
       if (!timeSync?.synchronized) issues.push('未确认时钟已同步');
       else if (Math.abs(timeSync.offsetMs ?? 0) > 3000) issues.push('时钟偏差超过 3 秒');
@@ -212,7 +212,7 @@ export class ExamAutomationService implements OnApplicationBootstrap, OnModuleDe
         ) {
           throw new BadRequestException({
             code: 'offline_playback_unsupported',
-            message: '离线自动执行需要所有目标设备升级到 1.6.3 或更新客户端，请先运行考前检查。'
+            message: '离线自动执行需要所有目标设备升级到 1.6.4 或更新客户端，请先运行考前检查。'
           });
         }
       }

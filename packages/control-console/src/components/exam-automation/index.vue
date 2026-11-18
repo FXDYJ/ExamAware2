@@ -97,7 +97,7 @@
       <t-alert
         v-if="form.offlinePlayback"
         theme="warning"
-        message="需要 1.6.3 或更新客户端。准备成功后断网也会自动开始和结束；取消或修改计划需要设备重新联网同步。"
+        message="需要 1.6.4 或更新客户端。准备成功后断网也会自动开始和结束；取消或修改计划需要设备重新联网同步。"
       />
       <p class="console-muted">开始放映后，各科目的倒计时和提醒仍按档案中的时间执行。</p>
       <t-space>
