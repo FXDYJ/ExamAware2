@@ -10,7 +10,7 @@ export const CONTROL_HEARTBEAT_INTERVAL_MS = 20_000;
 export const EXAM_CONFIG_ARTIFACT_MEDIA_TYPE =
   'application/vnd.examaware.exam-config+json' as const;
 export const DEVICE_PLATFORM_VALUES = ['win32', 'darwin', 'linux', 'openharmony'] as const;
-export const DEVICE_ARCHITECTURE_VALUES = ['x64', 'arm64'] as const;
+export const DEVICE_ARCHITECTURE_VALUES = ['x64', 'arm64', 'ia32'] as const;
 export const DEVICE_ENROLLMENT_CODE_PATTERN = /^EA2-[A-Za-z0-9_-]{16,128}$/;
 export const PLAYER_STATUS_VALUES = ['idle', 'preparing', 'ready', 'playing', 'error'] as const;
 export const PLAYER_STATUS = {
@@ -59,6 +59,7 @@ export const CONTROL_CAPABILITY_NAMES = {
   playback: 'playback',
   broadcast: 'broadcast',
   managedSettings: 'managed-settings',
+  unattendedPlayback: 'unattended-playback',
   errorReporting: 'error-reporting'
 } as const;
 export const MANAGED_SETTINGS_REPLACE_CAPABILITY_VERSION = 2;
@@ -300,12 +301,28 @@ export const examConfigArtifactSchema = z
   })
   .strict();
 
+export const automationWindowSchema = z
+  .object({
+    startAt: z.iso.datetime({ offset: true }),
+    stopAt: z.iso.datetime({ offset: true }),
+    latestStartAt: z.iso.datetime({ offset: true })
+  })
+  .strict()
+  .refine(
+    (window) =>
+      Date.parse(window.stopAt) > Date.parse(window.startAt) &&
+      Date.parse(window.latestStartAt) >= Date.parse(window.startAt) &&
+      Date.parse(window.latestStartAt) <= Date.parse(window.stopAt),
+    'Invalid unattended playback window'
+  );
+
 export const examConfigPreparePayloadSchema = z
   .object({
     deploymentId: z.uuid(),
     examConfigId: z.uuid(),
     examConfigVersionId: z.uuid(),
-    artifact: examConfigArtifactSchema
+    artifact: examConfigArtifactSchema,
+    automation: automationWindowSchema.optional()
   })
   .strict();
 

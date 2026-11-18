@@ -385,7 +385,10 @@ export class ControlCommandsService {
       };
     }
 
-    const capabilityName = COMMAND_CAPABILITY_NAMES[command.type];
+    const capabilityName =
+      command.type === CONTROL_COMMAND_TYPES.examConfigPrepare && command.payload.automation
+        ? CONTROL_CAPABILITY_NAMES.unattendedPlayback
+        : COMMAND_CAPABILITY_NAMES[command.type];
     const requiredCommandVersion =
       command.type === CONTROL_COMMAND_TYPES.settingsApply && command.payload.replace === true
         ? MANAGED_SETTINGS_REPLACE_CAPABILITY_VERSION

@@ -1,11 +1,16 @@
 <template>
   <t-card title="无人值守" :bordered="false">
     <template #actions>
-      <t-space v-if="canWrite">
-        <t-button v-if="!running" variant="outline" @click="openEditor">{{
+      <t-space>
+        <t-button variant="outline" :loading="checking" @click="checkDevices">考前检查</t-button>
+        <t-button v-if="canWrite && !running" variant="outline" @click="openEditor">{{
           active ? '修改计划' : '设置执行计划'
         }}</t-button>
-        <t-popconfirm v-if="active" content="取消计划会停止本次放映，确认取消？" @confirm="cancel">
+        <t-popconfirm
+          v-if="canWrite && active"
+          content="取消计划会停止本次放映，确认取消？"
+          @confirm="cancel"
+        >
           <t-button theme="danger" variant="outline" :loading="saving">取消计划并停止</t-button>
         </t-popconfirm>
       </t-space>
@@ -28,6 +33,12 @@
       }}</t-descriptions-item>
       <t-descriptions-item label="自动结束放映">{{
         formatDateTime(plan.stopAt)
+      }}</t-descriptions-item>
+      <t-descriptions-item label="离线执行">{{
+        plan.offlinePlayback ? '已启用' : '由服务器下发'
+      }}</t-descriptions-item>
+      <t-descriptions-item label="迟上线截止">{{
+        plan.lateJoinMinutes ? `开始后 ${plan.lateJoinMinutes} 分钟` : '结束前均可开始'
       }}</t-descriptions-item>
     </t-descriptions>
     <p v-else-if="!loadError" class="console-muted">
@@ -74,6 +85,20 @@
           class="automation-time"
         />
       </t-form-item>
+      <t-form-item label="允许迟上线自动开始（分钟）">
+        <t-input-number v-model="form.lateJoinMinutes" :min="0" :decimal-places="0" />
+        <span class="console-muted">0 表示结束前均可开始</span>
+      </t-form-item>
+      <t-form-item
+        ><t-checkbox v-model="form.offlinePlayback"
+          >下载后由客户端离线定时执行</t-checkbox
+        ></t-form-item
+      >
+      <t-alert
+        v-if="form.offlinePlayback"
+        theme="warning"
+        message="需要 1.6.3 或更新客户端。准备成功后断网也会自动开始和结束；取消或修改计划需要设备重新联网同步。"
+      />
       <p class="console-muted">开始放映后，各科目的倒计时和提醒仍按档案中的时间执行。</p>
       <t-space>
         <t-button type="submit" :loading="saving">保存执行计划</t-button>
@@ -81,13 +106,17 @@
       </t-space>
     </t-form>
   </t-dialog>
+  <t-dialog v-model:visible="preflightVisible" header="考前检查" width="900px" :footer="false">
+    <ExamPreflight v-if="preflightReport" :report="preflightReport" />
+  </t-dialog>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { examConfigsApi } from '@/api/control/exam-configs';
-import type { ExamAutomation, ExamConfigDetail } from '@/api/control/types';
+import type { ExamAutomation, ExamConfigDetail, ExamPreflightReport } from '@/api/control/types';
+import ExamPreflight from './preflight.vue';
 
 const props = defineProps<{ exam: ExamConfigDetail; canWrite: boolean }>();
 const emit = defineEmits<{ changed: [active: boolean] }>();
@@ -95,6 +124,9 @@ const plan = ref<ExamAutomation | null>(null);
 const editing = ref(false);
 const saving = ref(false);
 const loadError = ref('');
+const checking = ref(false);
+const preflightVisible = ref(false);
+const preflightReport = ref<ExamPreflightReport>();
 const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const active = computed(
   () => !!plan.value && ['scheduled', 'preparing', 'active'].includes(plan.value.status)
@@ -107,7 +139,13 @@ const statusLabels = {
   completed: '已结束',
   cancelled: '已取消'
 };
-const form = reactive({ prepareAt: '', startAt: '', stopAt: '' });
+const form = reactive({
+  prepareAt: '',
+  startAt: '',
+  stopAt: '',
+  offlinePlayback: true,
+  lateJoinMinutes: 0
+});
 let timer: ReturnType<typeof setInterval> | undefined;
 let refreshing = false;
 let disposed = false;
@@ -131,6 +169,8 @@ function openEditor() {
   form.stopAt = localTime(
     active.value ? plan.value!.stopAt : Math.max(startAt + 60 * 60_000, last + 5 * 60_000)
   );
+  form.offlinePlayback = active.value ? plan.value!.offlinePlayback : true;
+  form.lateJoinMinutes = active.value ? plan.value!.lateJoinMinutes : 0;
   editing.value = true;
 }
 
@@ -153,7 +193,10 @@ async function refresh() {
 async function save() {
   if (saving.value) return;
   const times = Object.fromEntries(
-    Object.entries(form).map(([key, value]) => [key, new Date(value).getTime()])
+    ['prepareAt', 'startAt', 'stopAt'].map((key) => [
+      key,
+      new Date(form[key as 'prepareAt' | 'startAt' | 'stopAt']).getTime()
+    ])
   );
   if (
     !Object.values(times).every(Number.isFinite) ||
@@ -169,7 +212,9 @@ async function save() {
     plan.value = await examConfigsApi.saveAutomation(props.exam.id, {
       prepareAt: new Date(times.prepareAt).toISOString(),
       startAt: new Date(times.startAt).toISOString(),
-      stopAt: new Date(times.stopAt).toISOString()
+      stopAt: new Date(times.stopAt).toISOString(),
+      offlinePlayback: form.offlinePlayback,
+      lateJoinMinutes: form.lateJoinMinutes ?? 0
     });
     emit('changed', active.value);
     editing.value = false;
@@ -178,6 +223,18 @@ async function save() {
     await MessagePlugin.error(error instanceof Error ? error.message : '计划保存失败');
   } finally {
     saving.value = false;
+  }
+}
+
+async function checkDevices() {
+  checking.value = true;
+  try {
+    preflightReport.value = await examConfigsApi.preflight(props.exam.id);
+    preflightVisible.value = true;
+  } catch (error) {
+    await MessagePlugin.error(error instanceof Error ? error.message : '考前检查失败');
+  } finally {
+    checking.value = false;
   }
 }
 

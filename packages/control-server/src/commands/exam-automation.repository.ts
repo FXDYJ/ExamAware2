@@ -1,14 +1,25 @@
 import { Injectable } from '@nestjs/common';
-import { and, eq, gt, inArray, lt, lte } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, lt, lte } from 'drizzle-orm';
 import type { DatabaseTransaction } from '../database/client.js';
 import { DatabaseService } from '../database/database.service.js';
 import { examAutomation, type ExamAutomationRecord } from './exam-automation.schema.js';
+import { examConfig } from '../exam-configs/exam-config.schema.js';
 
 export const RUNNING_AUTOMATION_STATUSES = ['scheduled', 'preparing', 'active'] as const;
 
 @Injectable()
 export class ExamAutomationRepository {
   constructor(private readonly database: DatabaseService) {}
+
+  async list() {
+    const rows = await this.database.db
+      .select({ plan: examAutomation, name: examConfig.name })
+      .from(examAutomation)
+      .innerJoin(examConfig, eq(examConfig.id, examAutomation.examConfigId))
+      .where(isNull(examConfig.deletedAt))
+      .orderBy(asc(examAutomation.startAt));
+    return rows.map((row) => ({ ...row.plan, name: row.name }));
+  }
 
   async get(examConfigId: string, transaction = this.database.db) {
     return (

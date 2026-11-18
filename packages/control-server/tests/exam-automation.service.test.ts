@@ -98,6 +98,24 @@ function setup() {
     )
   };
   const audit = { record: vi.fn() };
+  const devices = {
+    findByIds: vi.fn(async () =>
+      deviceIds.map((id) => ({
+        id,
+        displayName: id,
+        lifecycleStatus: 'active',
+        lastSeenAt: new Date(),
+        appVersion: '1.6.3',
+        lastCapabilities: {
+          commands: [
+            { name: 'exam-deployment', version: 1 },
+            { name: 'unattended-playback', version: 1 }
+          ]
+        },
+        lastReportedState: { timeSync: { synchronized: true, offsetMs: 0 } }
+      }))
+    )
+  };
   const create = () =>
     new ExamAutomationService(
       database as never,
@@ -105,13 +123,17 @@ function setup() {
       exams as never,
       commands as never,
       commandRecords as never,
-      audit as never
+      audit as never,
+      devices as never,
+      { isOnline: () => true } as never
     );
   const service = create();
   const times = {
     prepareAt: '2030-01-01T00:01:00Z',
     startAt: '2030-01-01T00:02:00Z',
-    stopAt: '2030-01-01T01:00:00Z'
+    stopAt: '2030-01-01T01:00:00Z',
+    offlinePlayback: false,
+    lateJoinMinutes: 0
   };
   const save = () =>
     service.save(examId, times, {
@@ -134,6 +156,7 @@ function setup() {
     exams,
     examId,
     deviceIds,
+    devices,
     times,
     target
   };
@@ -148,6 +171,57 @@ describe('unattended exam execution', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('attaches local timing only when offline playback was explicitly enabled', async () => {
+    const f = setup();
+    f.times.offlinePlayback = true;
+    await f.save();
+    await f.service.tick(new Date(f.times.prepareAt));
+    const command = f.records.get(f.state.plan!.id)!.command;
+    expect(command.type).toBe('exam-config.prepare');
+    if (command.type === 'exam-config.prepare')
+      expect(command.payload.automation).toEqual({
+        startAt: new Date(f.times.startAt).toISOString(),
+        stopAt: new Date(f.times.stopAt).toISOString(),
+        latestStartAt: new Date(f.times.stopAt).toISOString()
+      });
+  });
+
+  it('expires activation commands at the late join cutoff and skips later arrivals', async () => {
+    const f = setup();
+    f.times.lateJoinMinutes = 1;
+    await f.save();
+    await f.service.tick(new Date(f.times.prepareAt));
+    const plan = f.state.plan!;
+    f.target(plan.id, 0, 'succeeded');
+    await f.service.tick(new Date('2030-01-01T00:02:15Z'));
+    expect(f.commands.issue.mock.calls[1]![2]).toEqual(new Date('2030-01-01T00:03:00Z'));
+    f.target(plan.id, 1, 'succeeded');
+    await f.service.tick(new Date('2030-01-01T00:03:01Z'));
+    expect(f.records.has(plan.activationCommandIds[f.deviceIds[1]!]!)).toBe(false);
+  });
+
+  it('checks online state, offline capability and clock health before an exam', async () => {
+    const f = setup();
+    await f.save();
+    const healthy = await f.service.preflight(f.examId);
+    expect(healthy.ready).toBe(2);
+    f.devices.findByIds.mockImplementation(async () =>
+      f.deviceIds.map((id) => ({
+        id,
+        displayName: id,
+        lifecycleStatus: 'active',
+        lastSeenAt: new Date('2029-12-31T00:00:00Z'),
+        appVersion: '1.6.2',
+        lastCapabilities: { commands: [] },
+        lastReportedState: { timeSync: { synchronized: false, offsetMs: 10_000 } }
+      }))
+    );
+    const stale = await f.service.preflight(f.examId);
+    expect(stale.ready).toBe(0);
+    expect(stale.devices[0]!.issues).toContain('设备离线');
+    expect(stale.devices[0]!.issues).toContain('未确认时钟已同步');
   });
 
   it('persists fixed targets and does not prepare before the configured time', async () => {

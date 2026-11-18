@@ -14,6 +14,8 @@ import {
   createPlaybackActivateCommand,
   createPlaybackStopCommand,
   EXAM_CONFIG_ARTIFACT_MEDIA_TYPE,
+  CONTROL_CAPABILITY_NAMES,
+  CONTROL_OFFLINE_AFTER_MS,
   type ControlCommand
 } from '@dsz-examaware/control-protocol';
 import type { WriteContext } from '../api/write-context.js';
@@ -21,6 +23,8 @@ import { AuditService } from '../audit/audit.service.js';
 import { DatabaseService } from '../database/database.service.js';
 import type { DatabaseTransaction } from '../database/client.js';
 import { env } from '../config/env.js';
+import { DevicesRepository } from '../devices/devices.repository.js';
+import { DeviceConnectionsService } from '../devices/device-connections.service.js';
 import { ExamConfigsRepository } from '../exam-configs/exam-configs.repository.js';
 import { createExamConfigArtifactBytes } from '../exam-configs/exam-config-artifact.js';
 import { ControlCommandsRepository } from './control-commands.repository.js';
@@ -44,7 +48,9 @@ export class ExamAutomationService implements OnApplicationBootstrap, OnModuleDe
     private readonly exams: ExamConfigsRepository,
     private readonly commands: ControlCommandsService,
     private readonly commandRecords: ControlCommandsRepository,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly devices: DevicesRepository,
+    private readonly connections: DeviceConnectionsService
   ) {}
 
   onApplicationBootstrap() {
@@ -83,6 +89,73 @@ export class ExamAutomationService implements OnApplicationBootstrap, OnModuleDe
       failedCount: [...prepare, ...activations.flat()].filter((target) =>
         ['failed', 'expired'].includes(target.status)
       ).length
+    };
+  }
+
+  list() {
+    return this.repository.list();
+  }
+
+  async preflight(examConfigId: string) {
+    const [plan, exam] = await Promise.all([
+      this.repository.get(examConfigId),
+      this.exams.findById(examConfigId)
+    ]);
+    if (!exam) throw new NotFoundException('考试不存在');
+    const version = await this.exams.findVersion(examConfigId, plan?.version ?? exam.latestVersion);
+    if (!version) throw new NotFoundException('考试版本不存在');
+    const deviceIds =
+      plan?.deviceIds ??
+      (await this.commands.resolveTargets(
+        { deviceIds: exam.assignedDeviceIds, partitionNodeIds: exam.assignedPartitionNodeIds },
+        createPlaybackActivateCommand({
+          deploymentId: randomUUID(),
+          examConfigVersionId: version.id
+        }),
+        false
+      ));
+    const records = await this.devices.findByIds(deviceIds);
+    const checkedAt = new Date();
+    const devices = deviceIds.map((id) => {
+      const device = records.find((record) => record.id === id);
+      const online =
+        this.connections.isOnline(id) &&
+        !!device?.lastSeenAt &&
+        checkedAt.getTime() - device.lastSeenAt.getTime() < CONTROL_OFFLINE_AFTER_MS;
+      const supportsOffline = !!device?.lastCapabilities?.commands.some(
+        (capability) => capability.name === CONTROL_CAPABILITY_NAMES.unattendedPlayback
+      );
+      const issues: string[] = [];
+      if (!device || device.lifecycleStatus !== 'active') issues.push('设备不存在或已撤销');
+      if (!online) issues.push('设备离线');
+      if (
+        !device?.lastCapabilities?.commands.some(
+          (capability) => capability.name === CONTROL_CAPABILITY_NAMES.examDeployment
+        )
+      )
+        issues.push('未确认支持考试下发');
+      if (plan?.offlinePlayback && !supportsOffline) issues.push('离线执行需要 1.6.3 或更新客户端');
+      const timeSync = device?.lastReportedState?.timeSync;
+      if (!timeSync?.synchronized) issues.push('未确认时钟已同步');
+      else if (Math.abs(timeSync.offsetMs ?? 0) > 3000) issues.push('时钟偏差超过 3 秒');
+      return {
+        id,
+        displayName: device?.displayName ?? id,
+        online,
+        supportsOffline,
+        lastSeenAt: device?.lastSeenAt ?? null,
+        appVersion: device?.appVersion ?? null,
+        player: device?.lastReportedState?.player ?? null,
+        timeSync: timeSync ?? null,
+        issues
+      };
+    });
+    return {
+      checkedAt,
+      version: version.version,
+      total: devices.length,
+      ready: devices.filter((device) => !device.issues.length).length,
+      devices
     };
   }
 
@@ -127,6 +200,22 @@ export class ExamAutomationService implements OnApplicationBootstrap, OnModuleDe
         createPlaybackActivateCommand({ deploymentId: id, examConfigVersionId: version.id }),
         true
       );
+      if (input.offlinePlayback) {
+        const targets = await this.devices.findByIds(deviceIds);
+        if (
+          targets.some(
+            (device) =>
+              !device.lastCapabilities?.commands.some(
+                (capability) => capability.name === CONTROL_CAPABILITY_NAMES.unattendedPlayback
+              )
+          )
+        ) {
+          throw new BadRequestException({
+            code: 'offline_playback_unsupported',
+            message: '离线自动执行需要所有目标设备升级到 1.6.3 或更新客户端，请先运行考前检查。'
+          });
+        }
+      }
       const overlaps = await this.repository.overlapping(transaction, prepareAt, stopAt);
       if (
         overlaps.some(
@@ -153,6 +242,8 @@ export class ExamAutomationService implements OnApplicationBootstrap, OnModuleDe
         prepareAt,
         startAt,
         stopAt,
+        offlinePlayback: input.offlinePlayback ?? false,
+        lateJoinMinutes: input.lateJoinMinutes ?? 0,
         status: 'scheduled',
         lastError: null,
         createdBy: context.actorUserId,
@@ -169,7 +260,9 @@ export class ExamAutomationService implements OnApplicationBootstrap, OnModuleDe
           deviceIds,
           prepareAt: input.prepareAt,
           startAt: input.startAt,
-          stopAt: input.stopAt
+          stopAt: input.stopAt,
+          offlinePlayback: plan.offlinePlayback,
+          lateJoinMinutes: plan.lateJoinMinutes
         }
       });
     });
@@ -249,6 +342,15 @@ export class ExamAutomationService implements OnApplicationBootstrap, OnModuleDe
         deploymentId: plan.id,
         examConfigId: plan.examConfigId,
         examConfigVersionId: version.id,
+        ...(plan.offlinePlayback
+          ? {
+              automation: {
+                startAt: plan.startAt.toISOString(),
+                stopAt: plan.stopAt.toISOString(),
+                latestStartAt: this.latestStartAt(plan).toISOString()
+              }
+            }
+          : {}),
         artifact: {
           url: new URL(
             `/api/v1/device-artifacts/exam-configs/${plan.examConfigId}/versions/${plan.version}?deploymentId=${plan.id}`,
@@ -270,7 +372,7 @@ export class ExamAutomationService implements OnApplicationBootstrap, OnModuleDe
       .map((target) => target.errorMessage)
       .filter(Boolean);
     let status = plan.status === 'active' ? ('active' as const) : ('preparing' as const);
-    if (now >= plan.startAt) {
+    if (now >= plan.startAt && now < this.latestStartAt(plan)) {
       // Each prepared screen starts independently, including screens that came online late.
       for (const target of prepared.filter((target) => target.status === 'succeeded')) {
         const commandId = plan.activationCommandIds[target.deviceId]!;
@@ -279,7 +381,7 @@ export class ExamAutomationService implements OnApplicationBootstrap, OnModuleDe
           commandId,
           createPlaybackActivateCommand({ deploymentId: plan.id, examConfigVersionId: version.id }),
           [target.deviceId],
-          plan.stopAt
+          this.latestStartAt(plan)
         );
         await this.retryDelivery(commandId, now);
         const results = await this.commandRecords.targets(commandId);
@@ -297,6 +399,14 @@ export class ExamAutomationService implements OnApplicationBootstrap, OnModuleDe
       status,
       lastError: errors.join('；') || null
     });
+  }
+
+  private latestStartAt(plan: ExamAutomationRecord) {
+    return new Date(
+      plan.lateJoinMinutes > 0
+        ? Math.min(plan.stopAt.getTime(), plan.startAt.getTime() + plan.lateJoinMinutes * 60_000)
+        : plan.stopAt.getTime()
+    );
   }
 
   private async issueOnce(
@@ -346,6 +456,22 @@ export class ExamAutomationService implements OnApplicationBootstrap, OnModuleDe
       );
     }
     await this.exams.setStatus(plan.examConfigId, 'completed');
-    await this.repository.update(transaction, plan.examConfigId, { status, lastError: null });
+    const confirmations = await Promise.all(
+      Object.values(plan.activationCommandIds).map((id) => this.commandRecords.targets(id))
+    );
+    const confirmed = new Set(
+      confirmations
+        .flat()
+        .filter((target) => target.status === 'succeeded')
+        .map((target) => target.deviceId)
+    );
+    const missing = plan.deviceIds.filter((id) => !confirmed.has(id)).length;
+    await this.repository.update(transaction, plan.examConfigId, {
+      status,
+      lastError:
+        status === 'completed' && missing
+          ? `计划结束，尚未收到 ${missing} 台设备的放映确认，请查看设备和命令记录。`
+          : null
+    });
   }
 }

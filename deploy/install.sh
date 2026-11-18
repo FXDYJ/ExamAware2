@@ -3,15 +3,14 @@ set -Eeuo pipefail
 shopt -s extglob
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/examaware-control}"
-readonly REPOSITORY="ExamAware/ExamAware-Control"
+readonly REPOSITORY="FXDYJ/ExamAware2"
 readonly RELEASE_ROOT="https://github.com/${REPOSITORY}/releases"
 readonly INSTALLER_STATE_VERSION_CURRENT="1"
 readonly DOCKER_INSTALL_COMMAND='bash <(curl -sSL https://linuxmirrors.cn/docker.sh)'
 readonly DEFAULT_GITHUB_MIRRORS='https://github.chenc.dev/ https://ghproxy.cfd/ https://ghproxy.cc/ https://gh-proxy.com/'
 readonly DOMESTIC_POSTGRES_IMAGE='docker.1ms.run/postgres:17-alpine'
 readonly OFFICIAL_POSTGRES_IMAGE='postgres:17-alpine'
-readonly DOMESTIC_CONTROL_REGISTRY='ghcr.1ms.run'
-readonly OFFICIAL_CONTROL_REGISTRY='ghcr.io'
+readonly DEFAULT_CONTROL_REGISTRY='02658d00530d8704a51263b4ee0e716d.d.1ms.run'
 
 CURRENT_STAGE="初始化"
 STAGE_NUMBER=0
@@ -649,10 +648,10 @@ prepare_new_install_settings() {
   SITE_ADDRESS="${SITE_ADDRESS:-:80}"
   if [[ "${DOCKER_ACCELERATE:-1}" == "0" ]]; then
     POSTGRES_IMAGE="${POSTGRES_IMAGE:-$OFFICIAL_POSTGRES_IMAGE}"
-    CONTROL_REGISTRY="${CONTROL_REGISTRY:-$OFFICIAL_CONTROL_REGISTRY}"
+    CONTROL_REGISTRY="${CONTROL_REGISTRY:-$DEFAULT_CONTROL_REGISTRY}"
   else
     POSTGRES_IMAGE="${POSTGRES_IMAGE:-$DOMESTIC_POSTGRES_IMAGE}"
-    CONTROL_REGISTRY="${CONTROL_REGISTRY:-$DOMESTIC_CONTROL_REGISTRY}"
+    CONTROL_REGISTRY="${CONTROL_REGISTRY:-$DEFAULT_CONTROL_REGISTRY}"
   fi
   validate_common_settings
 }
@@ -664,17 +663,19 @@ prepare_update_settings() {
     LEGACY_STATE=1
     INSTALLER_STATE_VERSION="$INSTALLER_STATE_VERSION_CURRENT"
     if [[ "$MODE" == "docker" ]]; then
-      [[ "$CONTROL_REGISTRY" == "$OFFICIAL_CONTROL_REGISTRY" ]] && CONTROL_REGISTRY="$DOMESTIC_CONTROL_REGISTRY"
       [[ "$POSTGRES_IMAGE" == "$OFFICIAL_POSTGRES_IMAGE" ]] && POSTGRES_IMAGE="$DOMESTIC_POSTGRES_IMAGE"
       [[ "$SITE_ADDRESS" == ":${HTTP_PORT}" ]] && SITE_ADDRESS=":80"
     fi
   elif [[ "$INSTALLER_STATE_VERSION" != "$INSTALLER_STATE_VERSION_CURRENT" ]]; then
     die 2 "不支持的 INSTALLER_STATE_VERSION=${INSTALLER_STATE_VERSION}。"
   fi
+  if [[ "$MODE" == "docker" && ( "$CONTROL_REGISTRY" == "ghcr.io" || "$CONTROL_REGISTRY" == "ghcr.1ms.run" ) ]]; then
+    CONTROL_REGISTRY="$DEFAULT_CONTROL_REGISTRY"
+  fi
   POSTGRES_IMAGE_EXPLICIT=1
   CONTROL_REGISTRY_EXPLICIT=1
   [[ "$POSTGRES_IMAGE" == "$DOMESTIC_POSTGRES_IMAGE" ]] && POSTGRES_IMAGE_EXPLICIT=0
-  [[ "$CONTROL_REGISTRY" == "$DOMESTIC_CONTROL_REGISTRY" ]] && CONTROL_REGISTRY_EXPLICIT=0
+  [[ "$CONTROL_REGISTRY" == "$DEFAULT_CONTROL_REGISTRY" ]] && CONTROL_REGISTRY_EXPLICIT=0
   NODE_ENV="${NODE_ENV:-production}"
   if [[ -z "$DOMAIN" && "$SITE_ADDRESS" != :* ]]; then
     DOMAIN="$SITE_ADDRESS"
@@ -925,11 +926,11 @@ pull_candidate_images() {
     return 0
   fi
   if (( POSTGRES_IMAGE_EXPLICIT == 0 || CONTROL_REGISTRY_EXPLICIT == 0 )); then
-    status_warn "自动选择的国内镜像拉取失败，仅回退官方源一次。"
+    status_warn "镜像拉取失败，切换 PostgreSQL 源并重试集控加速源。"
     (( POSTGRES_IMAGE_EXPLICIT == 0 )) && POSTGRES_IMAGE="$OFFICIAL_POSTGRES_IMAGE"
-    (( CONTROL_REGISTRY_EXPLICIT == 0 )) && CONTROL_REGISTRY="$OFFICIAL_CONTROL_REGISTRY"
+    (( CONTROL_REGISTRY_EXPLICIT == 0 )) && CONTROL_REGISTRY="$DEFAULT_CONTROL_REGISTRY"
     refresh_candidate_env
-    docker_compose pull || die 4 "国内镜像与官方镜像均拉取失败；可显式设置 POSTGRES_IMAGE/CONTROL_REGISTRY。"
+    docker_compose pull || die 4 "镜像拉取失败；请检查加速域名，或显式设置 POSTGRES_IMAGE/CONTROL_REGISTRY。"
     return 0
   fi
   die 4 "显式配置的镜像拉取失败；不会擅自切换私有镜像源。"

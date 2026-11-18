@@ -78,6 +78,13 @@
       "when": 1794977356628,
       "tag": "0010_unattended_exams",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795019340942,
+      "tag": "0011_offline_automation",
+      "breakpoints": true
     }
   ]
 }

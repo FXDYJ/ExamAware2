@@ -152,11 +152,30 @@ export interface ExamAutomation {
   prepareAt: string;
   startAt: string;
   stopAt: string;
+  offlinePlayback: boolean;
+  lateJoinMinutes: number;
   status: 'scheduled' | 'preparing' | 'active' | 'completed' | 'cancelled';
   lastError: string | null;
   preparedCount: number;
   startedCount: number;
   failedCount: number;
+}
+
+export interface ExamPreflightReport {
+  checkedAt: string;
+  version: number;
+  total: number;
+  ready: number;
+  devices: {
+    id: string;
+    displayName: string;
+    online: boolean;
+    supportsOffline: boolean;
+    lastSeenAt: string | null;
+    appVersion: string | null;
+    timeSync: { synchronized: boolean; offsetMs?: number } | null;
+    issues: string[];
+  }[];
 }
 
 export interface PublicExamLinkResponse {

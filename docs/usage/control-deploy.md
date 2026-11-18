@@ -112,10 +112,10 @@ DOMAIN='control.example.com' bash /tmp/examaware-control-install.sh
 
 ```text
 POSTGRES_IMAGE=docker.1ms.run/postgres:17-alpine
-CONTROL_REGISTRY=ghcr.1ms.run
+CONTROL_REGISTRY=02658d00530d8704a51263b4ee0e716d.d.1ms.run
 ```
 
-国内自动默认拉取失败时，安装器只回退一次 `postgres:17-alpine`/`ghcr.io`，并将实际成功值持久化。禁用 Docker 拉取代理：
+自动默认拉取失败时，安装器切换一次 PostgreSQL 到 `postgres:17-alpine` 后重试，集控继续使用指定加速域名。升级会将旧的 `ghcr.io`、`ghcr.1ms.run` 集控源迁移到上面的地址，保留自定义私库和设备凭据。让 PostgreSQL 直接使用官方源：
 
 ```bash
 DOCKER_ACCELERATE=0 bash /tmp/examaware-control-install.sh

@@ -21,7 +21,20 @@ const state = vi.hoisted(() => ({
   loadManagedValues: vi.fn(),
   saveManagedValues: vi.fn(),
   clearManagedValues: vi.fn(),
-  startManagedConfigWatch: vi.fn()
+  startManagedConfigWatch: vi.fn(),
+  keepAwake: vi.fn(() => 1),
+  releaseAwake: vi.fn()
+}))
+
+vi.mock('electron', () => ({
+  powerSaveBlocker: { start: state.keepAwake, stop: state.releaseAwake, isStarted: () => true }
+}))
+vi.mock('../../../src/main/control/offlinePlaybackStore', () => ({
+  loadOfflineDeployments: vi.fn(async () => []),
+  saveOfflineDeployments: vi.fn(async () => {})
+}))
+vi.mock('../../../src/main/logging/logger', () => ({
+  appLogger: { error: vi.fn(), warn: vi.fn() }
 }))
 
 vi.mock('../../../src/main/player/playerSessionService', () => ({
@@ -37,7 +50,8 @@ vi.mock('../../../src/main/config/configStore', () => ({
 }))
 
 vi.mock('../../../src/main/timeSync/timeService', () => ({
-  applyTimeConfig: state.applyTimeConfig
+  applyTimeConfig: state.applyTimeConfig,
+  getCurrentTimeMs: () => Date.now()
 }))
 
 vi.mock('../../../src/main/control/managedControlStore', () => ({
@@ -130,6 +144,8 @@ describe('ControlService', () => {
     })
 
     const playing = await service.activateDeployment({ deploymentId, examConfigVersionId })
+    await service.activateDeployment({ deploymentId, examConfigVersionId })
+    expect(state.start).toHaveBeenCalledOnce()
     expect(state.start).toHaveBeenCalledWith(
       { kind: 'config', config: expect.objectContaining({ examName: 'Final Exam' }) },
       { replaceExisting: true, origin: 'control', deploymentId },
@@ -147,6 +163,8 @@ describe('ControlService', () => {
       player: { status: 'idle', deploymentId, examConfigVersionId }
     })
     expect(state.close).toHaveBeenCalledWith('control-session')
+    expect(state.keepAwake).toHaveBeenCalledWith('prevent-display-sleep')
+    expect(state.releaseAwake).toHaveBeenCalledWith(1)
 
     state.sessionListener?.({
       session: {
@@ -209,6 +227,63 @@ describe('ControlService', () => {
       type: 'broadcast-dismiss',
       payload: { broadcastId: deploymentId }
     })
+  })
+
+  it('starts a cached scheduled exam with no live server and stops it locally', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2030-01-01T00:00:00Z'))
+    try {
+      const config = {
+        ...examConfig,
+        examInfos: [
+          { name: 'Math', start: '2030-01-01T00:00:10Z', end: '2030-01-01T00:01:00Z', alertTime: 1 }
+        ]
+      }
+      const bytes = new TextEncoder().encode(JSON.stringify(config))
+      const agent = {
+        getRegistration: () => registration,
+        onChanged: vi.fn(() => () => {}),
+        getSnapshot: () => ({ state: 'reconnecting' }),
+        reportState: vi.fn()
+      }
+      const service = new ControlService()
+      service.attach(
+        agent as never,
+        {
+          downloadArtifact: vi.fn(async () => ({
+            bytes,
+            sha256: createHash('sha256').update(bytes).digest('hex')
+          }))
+        } as never
+      )
+      await service.prepareDeployment({
+        deploymentId,
+        examConfigId,
+        examConfigVersionId,
+        artifact: {
+          url: 'http://127.0.0.1:3100/exam',
+          mediaType: EXAM_CONFIG_ARTIFACT_MEDIA_TYPE,
+          sizeBytes: bytes.byteLength,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+          expiresAt: '2030-01-01T00:01:00Z'
+        },
+        automation: {
+          startAt: '2030-01-01T00:00:10Z',
+          stopAt: '2030-01-01T00:01:00Z',
+          latestStartAt: '2030-01-01T00:00:40Z'
+        }
+      })
+      expect(state.start).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(state.start).toHaveBeenCalledOnce()
+      expect(service.getDevicePlayerState()?.status).toBe('playing')
+      await vi.advanceTimersByTimeAsync(50_000)
+      expect(state.close).toHaveBeenCalledWith('control-session')
+      expect(service.getDevicePlayerState()?.status).toBe('idle')
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
   })
 
   it('blocks proctor calls when the managed button setting is disabled', async () => {

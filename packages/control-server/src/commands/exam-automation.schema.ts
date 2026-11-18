@@ -1,4 +1,13 @@
-import { index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uuid
+} from 'drizzle-orm/pg-core';
 import { user } from '../database/auth-schema.js';
 import { examConfig } from '../exam-configs/exam-config.schema.js';
 
@@ -19,6 +28,8 @@ export const examAutomation = pgTable(
     prepareAt: timestamp('prepare_at', { withTimezone: true }).notNull(),
     startAt: timestamp('start_at', { withTimezone: true }).notNull(),
     stopAt: timestamp('stop_at', { withTimezone: true }).notNull(),
+    offlinePlayback: boolean('offline_playback').default(false).notNull(),
+    lateJoinMinutes: integer('late_join_minutes').default(0).notNull(),
     status: text('status').$type<AutomationStatus>().default('scheduled').notNull(),
     lastError: text('last_error'),
     createdBy: text('created_by')

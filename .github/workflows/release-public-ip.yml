@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CONTROL_VERSION: control-v0.1.4
+  CONTROL_VERSION: control-v0.1.5
   PNPM_YES: 'true'
   HUSKY: '0'
 
@@ -139,7 +139,7 @@ jobs:
           HTTP_PORT: '18219'
           SITE_ADDRESS: ':80'
           POSTGRES_IMAGE: postgres:17-alpine
-          CONTROL_REGISTRY: ghcr.io
+          CONTROL_REGISTRY: 02658d00530d8704a51263b4ee0e716d.d.1ms.run
         run: |
           export POSTGRES_PASSWORD=$(openssl rand -hex 16)
           export BETTER_AUTH_SECRET=$(openssl rand -hex 32)

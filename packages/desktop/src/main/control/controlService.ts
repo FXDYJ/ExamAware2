@@ -10,6 +10,7 @@ import {
   type PlaybackStopCommand
 } from '@dsz-examaware/control-protocol'
 import { validateExamConfigDetailed, type ExamConfig } from '@dsz-examaware/core'
+import { powerSaveBlocker } from 'electron'
 import type {
   ControlProvider,
   ControlStatusSnapshot,
@@ -17,7 +18,7 @@ import type {
 } from '@dsz-examaware/plugin-sdk'
 import { setConfig } from '../config/configStore'
 import { playerSessionService } from '../player/playerSessionService'
-import { applyTimeConfig } from '../timeSync/timeService'
+import { applyTimeConfig, getCurrentTimeMs } from '../timeSync/timeService'
 import type { ControlAgentEvent } from '../../shared/types/control'
 import type { ControlApiClient } from './controlApiClient'
 import type { ControlAgentService } from './controlAgentService'
@@ -29,6 +30,9 @@ import {
   startManagedConfigWatch
 } from './managedControlStore'
 import { clearEnrollmentMarker, writeEnrollmentMarker } from './controlEnrollmentMarker'
+import { OfflinePlayback } from './offlinePlayback'
+import { loadOfflineDeployments, saveOfflineDeployments } from './offlinePlaybackStore'
+import { appLogger } from '../logging/logger'
 
 interface PreparedDeployment {
   deploymentId: string
@@ -44,6 +48,30 @@ export class ControlService {
   private readonly preparedDeployments = new Map<string, PreparedDeployment>()
   private readonly stoppedDeployments = new Set<string>()
   private readonly controlSessionByDeployment = new Map<string, string>()
+  private readonly activating = new Map<string, Promise<DeviceStateSnapshot>>()
+  private wakeLock?: number
+  private readonly offline = new OfflinePlayback({
+    binding: () => this.bindingKey(),
+    now: getCurrentTimeMs,
+    load: loadOfflineDeployments,
+    save: saveOfflineDeployments,
+    install: (record) => {
+      this.preparedDeployments.set(record.payload.deploymentId, {
+        ...record.payload,
+        config: record.config
+      })
+      if (this.playerState?.status !== PLAYER_STATUS.playing) {
+        this.playerState = {
+          status: PLAYER_STATUS.ready,
+          deploymentId: record.payload.deploymentId,
+          examConfigVersionId: record.payload.examConfigVersionId
+        }
+      }
+    },
+    activate: (record) => this.activateDeployment(record.payload),
+    stop: (deploymentId) => this.stopDeployment({ deploymentId }),
+    error: (error) => appLogger.error('[control] offline automation failed', error)
+  })
   private readonly managedKeys = new Set<string>()
   private readonly managedValues = new Map<string, unknown>()
   private playerState?: DevicePlayerState
@@ -63,8 +91,12 @@ export class ControlService {
 
       const prepared = this.preparedDeployments.get(deploymentId)
       this.controlSessionByDeployment.delete(deploymentId)
+      if (this.controlSessionByDeployment.size === 0) this.releaseDisplay()
       if (event.session.state === 'closed') {
         this.preparedDeployments.delete(deploymentId)
+        void this.offline
+          .forget(deploymentId)
+          .catch((error) => appLogger.error('[control] offline cache removal failed', error))
         this.playerState = {
           status: PLAYER_STATUS.idle,
           deploymentId,
@@ -87,6 +119,9 @@ export class ControlService {
     this.agent = agent
     this.apiClient = apiClient
     this.disposeAgentListener = agent.onChanged(() => {
+      void this.offline
+        .restore()
+        .catch((error) => appLogger.error('[control] offline schedule restore failed', error))
       this.emitStatusChanged()
     })
   }
@@ -221,6 +256,8 @@ export class ControlService {
       throw new ControlAgentError('bind_blocked_by_policy', '集控策略禁止重新绑定或更换集控服务器')
     }
     await this.requireAgent().enroll(input.serverUrl, input.enrollmentCode, input.displayName)
+    await this.offline.clear()
+    this.preparedDeployments.clear()
     const registration = this.agent?.getRegistration()
     if (registration) void writeEnrollmentMarker(registration)
     return this.getBuiltinStatus()
@@ -231,6 +268,7 @@ export class ControlService {
       throw new ControlAgentError('unbind_blocked_by_policy', '集控策略禁止解绑本设备')
     }
     await this.requireAgent().clearEnrollment()
+    await this.offline.clear()
     this.preparedDeployments.clear()
     this.managedKeys.clear()
     this.managedValues.clear()
@@ -287,12 +325,28 @@ export class ControlService {
     }
 
     this.assertDeploymentNotStopped(payload.deploymentId)
+    const current = this.getRegistration()
+    if (
+      current?.deviceId !== registration.deviceId ||
+      current?.serverUrl !== registration.serverUrl
+    ) {
+      throw new ControlAgentError('device_binding_changed', '下载过程中设备绑定发生变化')
+    }
     this.preparedDeployments.set(payload.deploymentId, {
       deploymentId: payload.deploymentId,
       examConfigId: payload.examConfigId,
       examConfigVersionId: payload.examConfigVersionId,
       config: validation.config
     })
+    await this.offline.remember(
+      payload,
+      validation.config,
+      `${registration.serverUrl}|${registration.deviceId}`
+    )
+    this.assertDeploymentNotStopped(payload.deploymentId)
+    if (this.bindingKey() !== `${registration.serverUrl}|${registration.deviceId}`) {
+      throw new ControlAgentError('device_binding_changed', '保存过程中设备绑定发生变化')
+    }
     this.playerState = {
       status: PLAYER_STATUS.ready,
       deploymentId: payload.deploymentId,
@@ -304,7 +358,27 @@ export class ControlService {
   async activateDeployment(
     payload: PlaybackActivateCommand['payload']
   ): Promise<DeviceStateSnapshot> {
+    const existing = this.activating.get(payload.deploymentId)
+    if (existing) return existing
+    const work = this.startDeployment(payload)
+    this.activating.set(payload.deploymentId, work)
+    try {
+      return await work
+    } finally {
+      this.activating.delete(payload.deploymentId)
+    }
+  }
+
+  private async startDeployment(
+    payload: PlaybackActivateCommand['payload']
+  ): Promise<DeviceStateSnapshot> {
     this.assertDeploymentNotStopped(payload.deploymentId)
+    if (
+      this.playerState?.status === PLAYER_STATUS.playing &&
+      this.playerState.deploymentId === payload.deploymentId &&
+      this.playerState.examConfigVersionId === payload.examConfigVersionId
+    )
+      return { player: { ...this.playerState } }
     const prepared = this.preparedDeployments.get(payload.deploymentId)
     if (!prepared) {
       throw new ControlAgentError('deployment_not_prepared', '集控考试尚未准备完成')
@@ -322,6 +396,9 @@ export class ControlService {
       this.assertDeploymentNotStopped(payload.deploymentId)
     }
     this.controlSessionByDeployment.set(payload.deploymentId, session.id)
+    if (this.wakeLock === undefined || !powerSaveBlocker.isStarted(this.wakeLock)) {
+      this.wakeLock = powerSaveBlocker.start('prevent-display-sleep')
+    }
     this.playerState = {
       status: PLAYER_STATUS.playing,
       deploymentId: payload.deploymentId,
@@ -339,7 +416,9 @@ export class ControlService {
     const sessionId = this.controlSessionByDeployment.get(payload.deploymentId)
     if (sessionId) await playerSessionService.close(sessionId)
     this.controlSessionByDeployment.delete(payload.deploymentId)
+    if (this.controlSessionByDeployment.size === 0) this.releaseDisplay()
     this.preparedDeployments.delete(payload.deploymentId)
+    await this.offline.forget(payload.deploymentId)
     this.playerState = {
       status: PLAYER_STATUS.idle,
       deploymentId: payload.deploymentId,
@@ -352,6 +431,16 @@ export class ControlService {
     if (this.stoppedDeployments.has(deploymentId)) {
       throw new ControlAgentError('deployment_stopped', '该集控考试已停止')
     }
+  }
+
+  private bindingKey() {
+    const registration = this.getRegistration()
+    return registration ? `${registration.serverUrl}|${registration.deviceId}` : undefined
+  }
+
+  private releaseDisplay() {
+    if (this.wakeLock !== undefined) powerSaveBlocker.stop(this.wakeLock)
+    this.wakeLock = undefined
   }
 
   emitBroadcast(payload: BroadcastShowCommand['payload']): void {

@@ -16,7 +16,7 @@ services:
       retries: 30
       start_period: 5s
   control-server:
-    image: ${CONTROL_REGISTRY:-ghcr.1ms.run}/examaware/control-server:${CONTROL_VERSION:-latest}
+    image: ${CONTROL_REGISTRY:-02658d00530d8704a51263b4ee0e716d.d.1ms.run}/fxdyj/examaware-control-server:${CONTROL_VERSION:-latest}
     restart: unless-stopped
     depends_on:
       control-postgres:
@@ -45,7 +45,7 @@ services:
       retries: 30
       start_period: 10s
   control-caddy:
-    image: ${CONTROL_REGISTRY:-ghcr.1ms.run}/examaware/control-console:${CONTROL_VERSION:-latest}
+    image: ${CONTROL_REGISTRY:-02658d00530d8704a51263b4ee0e716d.d.1ms.run}/fxdyj/examaware-control-console:${CONTROL_VERSION:-latest}
     restart: unless-stopped
     depends_on:
       control-server:

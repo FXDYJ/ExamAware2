@@ -1,0 +1,2 @@
+ALTER TABLE "exam_automation" ADD COLUMN "offline_playback" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "exam_automation" ADD COLUMN "late_join_minutes" integer DEFAULT 0 NOT NULL;

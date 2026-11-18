@@ -292,7 +292,7 @@ test_image_defaults_and_overrides() {
   CONTROL_ADMIN_PASSWORD='ExamAwareDefaultPass'
   prepare_new_install_settings
   assert_eq "$POSTGRES_IMAGE" 'docker.1ms.run/postgres:17-alpine'
-  assert_eq "$CONTROL_REGISTRY" 'ghcr.1ms.run'
+  assert_eq "$CONTROL_REGISTRY" '02658d00530d8704a51263b4ee0e716d.d.1ms.run'
 
   POSTGRES_IMAGE='private.example/postgres:17'
   CONTROL_REGISTRY='private.example/control'
@@ -313,7 +313,7 @@ prepare_pull_fixture() {
   CONTROL_ADMIN_USERNAME='admin'; CONTROL_ADMIN_NAME='Admin'; CONTROL_ADMIN_PASSWORD='administrator-secret'
   SITE_ADDRESS=':80'; HTTP_PORT='8219'; NODE_ENV='production'
   POSTGRES_IMAGE="${POSTGRES_IMAGE:-$DOMESTIC_POSTGRES_IMAGE}"
-  CONTROL_REGISTRY="${CONTROL_REGISTRY:-$DOMESTIC_CONTROL_REGISTRY}"
+  CONTROL_REGISTRY="${CONTROL_REGISTRY:-$DEFAULT_CONTROL_REGISTRY}"
   generate_env "$CANDIDATE_DIR/.env"
   COMPOSE_ENV_FILE="$CANDIDATE_DIR/.env"
   RUNTIME_COMPOSE="$CANDIDATE_DIR/compose.runtime.yml"
@@ -333,14 +333,14 @@ case " $* " in
   *) exit 0 ;;
 esac
 EOF
-  POSTGRES_IMAGE="$DOMESTIC_POSTGRES_IMAGE"; CONTROL_REGISTRY="$DOMESTIC_CONTROL_REGISTRY"
+  POSTGRES_IMAGE="$DOMESTIC_POSTGRES_IMAGE"; CONTROL_REGISTRY="$DEFAULT_CONTROL_REGISTRY"
   POSTGRES_IMAGE_EXPLICIT=0; CONTROL_REGISTRY_EXPLICIT=0
   prepare_pull_fixture "$candidate"
   PATH="$bin:$ORIGINAL_PATH" PULL_COUNT="$count" pull_candidate_images >/dev/null
   assert_eq "$(cat "$count")" '2'
   assert_eq "$POSTGRES_IMAGE" "$OFFICIAL_POSTGRES_IMAGE"
-  assert_eq "$CONTROL_REGISTRY" "$OFFICIAL_CONTROL_REGISTRY"
-  assert_contains "$(cat "$candidate/.env")" "CONTROL_REGISTRY='ghcr.io'"
+  assert_eq "$CONTROL_REGISTRY" "$DEFAULT_CONTROL_REGISTRY"
+  assert_contains "$(cat "$candidate/.env")" "CONTROL_REGISTRY='02658d00530d8704a51263b4ee0e716d.d.1ms.run'"
 }
 
 test_custom_image_never_falls_back() {
@@ -494,7 +494,20 @@ test_legacy_docker_migration_preserves_state() {
   assert_eq "$POSTGRES_PASSWORD" 'database-secret-value'
   assert_eq "$CONTROL_ADMIN_PASSWORD" 'administrator-secret'
   assert_eq "$POSTGRES_IMAGE" 'docker.1ms.run/postgres:17-alpine'
-  assert_eq "$CONTROL_REGISTRY" 'ghcr.1ms.run'
+  assert_eq "$CONTROL_REGISTRY" '02658d00530d8704a51263b4ee0e716d.d.1ms.run'
+}
+
+test_modern_registry_migration() {
+  source_installer
+  prepare_pull_fixture "$TEST_TMP/modern-registry"
+  MODE='docker'; LEGACY_STATE=0; INSTALLER_STATE_VERSION='1'
+  for previous in 'ghcr.io' 'ghcr.1ms.run'; do
+    CONTROL_REGISTRY="$previous"
+    prepare_update_settings
+    assert_eq "$CONTROL_REGISTRY" "$DEFAULT_CONTROL_REGISTRY"
+    assert_eq "$BETTER_AUTH_URL" 'http://192.0.2.8:8219'
+    assert_eq "$POSTGRES_PASSWORD" 'db-secret'
+  done
 }
 
 test_legacy_custom_registry_is_preserved() {
@@ -589,7 +602,7 @@ case " $* " in
   *) exit 0 ;;
 esac
 EOF
-  POSTGRES_IMAGE="$DOMESTIC_POSTGRES_IMAGE"; CONTROL_REGISTRY="$DOMESTIC_CONTROL_REGISTRY"
+  POSTGRES_IMAGE="$DOMESTIC_POSTGRES_IMAGE"; CONTROL_REGISTRY="$DEFAULT_CONTROL_REGISTRY"
   POSTGRES_IMAGE_EXPLICIT=0; CONTROL_REGISTRY_EXPLICIT=0
   prepare_pull_fixture "$candidate"
   set +e
@@ -608,7 +621,7 @@ test_start_failure_does_not_delete_volume() {
 printf '%s\n' "$*" >> "$DOCKER_LOG"
 case " $* " in *' up '*) exit 1;; *) exit 0;; esac
 EOF
-  POSTGRES_IMAGE="$DOMESTIC_POSTGRES_IMAGE"; CONTROL_REGISTRY="$DOMESTIC_CONTROL_REGISTRY"
+  POSTGRES_IMAGE="$DOMESTIC_POSTGRES_IMAGE"; CONTROL_REGISTRY="$DEFAULT_CONTROL_REGISTRY"
   prepare_pull_fixture "$candidate"
   printf '#!/bin/sh\n' > "$candidate/install.sh"
   printf '#!/bin/sh\n' > "$candidate/backup.sh"
@@ -648,6 +661,7 @@ run_case 'health requires status ok and database ok' test_health_success_and_fai
 run_case 'installer output excludes administrator database and auth secrets' test_logs_do_not_print_secrets
 run_case 'backup failure leaves no partial success file' test_backup_failure_removes_partial
 run_case 'legacy Docker update preserves secrets port and volume contract' test_legacy_docker_migration_preserves_state
+run_case 'modern upgrades migrate both old GHCR addresses to the requested accelerator' test_modern_registry_migration
 run_case 'legacy private registries are never rewritten' test_legacy_custom_registry_is_preserved
 run_case 'legacy native installation remains updateable' test_legacy_native_detection
 run_case 'new NATIVE installation is explicitly disabled' test_new_native_is_rejected

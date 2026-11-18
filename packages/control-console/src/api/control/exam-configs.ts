@@ -3,6 +3,7 @@ import { apiRequest } from '../http';
 import type {
   ExamConfigDetail,
   ExamAutomation,
+  ExamPreflightReport,
   ExamConfigSummary,
   ExamConfigVersion,
   PageResponse,
@@ -12,13 +13,32 @@ import type {
 const EXAM_CONFIGS_PATH = '/api/v1/exam-configs';
 
 export const examConfigsApi = {
+  listAutomation() {
+    return apiRequest<
+      (Omit<ExamAutomation, 'preparedCount' | 'startedCount' | 'failedCount'> & { name: string })[]
+    >('/api/v1/exam-automation');
+  },
+  preflight(id: string) {
+    return apiRequest<ExamPreflightReport>(
+      `${EXAM_CONFIGS_PATH}/${encodeURIComponent(id)}/automation/preflight`
+    );
+  },
   async getAutomation(id: string) {
     const response = await apiRequest<{ plan: ExamAutomation | null }>(
       `${EXAM_CONFIGS_PATH}/${encodeURIComponent(id)}/automation`
     );
     return response.plan;
   },
-  saveAutomation(id: string, input: { prepareAt: string; startAt: string; stopAt: string }) {
+  saveAutomation(
+    id: string,
+    input: {
+      prepareAt: string;
+      startAt: string;
+      stopAt: string;
+      offlinePlayback?: boolean;
+      lateJoinMinutes?: number;
+    }
+  ) {
     return apiRequest<ExamAutomation>(`${EXAM_CONFIGS_PATH}/${encodeURIComponent(id)}/automation`, {
       method: 'PUT',
       body: JSON.stringify(input)

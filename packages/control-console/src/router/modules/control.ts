@@ -36,6 +36,12 @@ export const controlRoutes: RouteRecordRaw[] = [
         meta: { title: '发起考试', hidden: true }
       },
       {
+        path: 'automation',
+        name: 'ExamAutomationOverview',
+        component: () => import('@/pages/exams/automation/index.vue'),
+        meta: { title: '无人值守总览' }
+      },
+      {
         path: ':id',
         name: 'ExamDetail',
         component: () => import('@/pages/exams/detail/index.vue'),

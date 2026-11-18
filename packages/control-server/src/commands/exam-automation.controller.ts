@@ -34,6 +34,12 @@ export class ExamAutomationController {
     return this.service.save(id, input, { actorUserId: session.user.id, requestId, publicOrigin });
   }
 
+  @Get('preflight')
+  @Roles(['admin', 'operator', 'viewer'])
+  preflight(@Param('examConfigId', ParseUUIDPipe) id: string) {
+    return this.service.preflight(id);
+  }
+
   @Delete()
   @Roles(['admin', 'operator'])
   async cancel(
@@ -42,5 +48,18 @@ export class ExamAutomationController {
     @RequestId() requestId: string
   ) {
     return { plan: await this.service.cancel(id, { actorUserId: session.user.id, requestId }) };
+  }
+}
+
+@ApiTags('exam-automation')
+@ApiCookieAuth('better-auth.session_token')
+@Controller({ path: 'exam-automation', version: API_VERSION })
+export class ExamAutomationOverviewController {
+  constructor(@Inject(ExamAutomationService) private readonly service: ExamAutomationService) {}
+
+  @Get()
+  @Roles(['admin', 'operator', 'viewer'])
+  list() {
+    return this.service.list();
   }
 }

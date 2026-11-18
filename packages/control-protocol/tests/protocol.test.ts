@@ -47,6 +47,13 @@ function hello() {
 }
 
 describe('control protocol schemas', () => {
+  it('accepts the architecture reported by the packaged 32-bit Windows client', () => {
+    const input = hello();
+    expect(
+      deviceHelloSchema.parse({ ...input, identity: { ...input.identity, architecture: 'ia32' } })
+        .identity.architecture
+    ).toBe('ia32');
+  });
   it('accepts Windows and OpenHarmony enrollment identities', () => {
     expect(
       enrollDeviceRequestSchema.parse({

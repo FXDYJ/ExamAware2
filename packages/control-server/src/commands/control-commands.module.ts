@@ -15,12 +15,16 @@ import { ControlCommandsRepository } from './control-commands.repository.js';
 import { ControlCommandsService } from './control-commands.service.js';
 import { ExamAutomationRepository } from './exam-automation.repository.js';
 import { ExamAutomationService } from './exam-automation.service.js';
-import { ExamAutomationController } from './exam-automation.controller.js';
+import {
+  ExamAutomationController,
+  ExamAutomationOverviewController
+} from './exam-automation.controller.js';
 
 @Module({
   imports: [AuditModule, DevicesModule, ExamConfigsModule, PartitionsModule],
   controllers: [
     ExamAutomationController,
+    ExamAutomationOverviewController,
     ControlCommandsController,
     ExamDeploymentsController,
     BroadcastsController,
