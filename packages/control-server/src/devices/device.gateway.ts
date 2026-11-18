@@ -238,6 +238,7 @@ export class DeviceGateway implements OnGatewayConnection, OnGatewayDisconnect {
         codec: CONTROL_PROTOCOL_CODEC
       })
     );
+    await this.commandsService.recoverScheduledDevice(device.id, message.state);
     await this.commandsService.deliverPending(device.id);
     try {
       await this.pushEffectiveSettings(device.id, message.capabilities);

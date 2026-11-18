@@ -4,19 +4,39 @@
 
 ## 公网 IP 直连版
 
-从 [此 fork 的发布页](https://github.com/FXDYJ/ExamAware2/releases/tag/control-v0.1.3) 下载 `ExamAware-1.6.1-public-ip-setup.exe`。
+从 [此 fork 的发布页](https://github.com/FXDYJ/ExamAware2/releases/tag/control-v0.1.4) 下载 `ExamAware-1.6.2-public-ip-setup.exe`。
 在已安装 Docker Engine 和 Docker Compose 插件的 Linux 服务器上运行以下命令。
 将 `192.0.2.10` 替换为服务器的公网 IP。
 
 ```bash
-curl -fsSL https://github.com/FXDYJ/ExamAware2/releases/download/control-v0.1.3/install.sh -o /tmp/examaware-control-install.sh && \
+curl -fsSL https://github.com/FXDYJ/ExamAware2/releases/download/control-v0.1.4/install.sh -o /tmp/examaware-control-install.sh && \
   EXAMAWARE_NONINTERACTIVE=1 BETTER_AUTH_URL=http://192.0.2.10:8219 HTTP_PORT=8219 \
-  bash /tmp/examaware-control-install.sh control-v0.1.3
+  bash /tmp/examaware-control-install.sh control-v0.1.4
 ```
 
 在服务器防火墙和云安全组放行 `8219/TCP`。安装结束后会显示自动生成的管理员密码。
 浏览器和客户端「学校集控」都填写同一个 `http://公网IP:8219`，IPv6 用方括号包住地址。
 HTTP 会明文传输凭据。部署配置保存在 `/opt/examaware-control/.env`，PostgreSQL 数据保存在 Docker 命名卷。
+
+### 无人值守
+
+提前上传考试档案并分配设备，在考试详情的「无人值守」中设置自动准备、自动开始放映、自动结束放映三个时间。
+新建考试默认先保存档案，可在详情中设置计划。时间按浏览器所在时区显示，保存时转换为 UTC。
+计划固定使用保存时的档案版本和目标设备，重复时间范围内的计划不能占用同一设备。
+
+计划保存后可以关闭后台，服务器每 2 秒检查数据库。服务重启后继续执行有效计划，已经过了结束时间的计划会结束。
+在线且准备完成的设备到点开始，离线设备在结束前上线后会自动补发和开始。失败的设备命令间隔 15 秒重试。
+到结束时间自动下发停止命令，也可随时在详情中「取消计划并停止」。客户端须保持运行，自动开机与登录由教室电脑配置。
+
+隐藏巡考按钮时，在「设备策略」新建或编辑一条策略，添加「显示呼叫巡考按钮」并设为关闭，再将策略应用到目标设备或设备组。
+此选项需要本 fork 的 1.6.2 客户端，设置为开启可恢复按钮。
+
+已有 Docker 安装运行以下命令升级。安装器会沿用已有地址、端口、设备凭据配置，并在升级前备份数据库。
+
+```bash
+curl -fsSL https://github.com/FXDYJ/ExamAware2/releases/download/control-v0.1.4/install.sh -o /tmp/examaware-control-install.sh && \
+  bash /tmp/examaware-control-install.sh control-v0.1.4
+```
 
 ![1764471277655](image/README/1764471277655.png)
 

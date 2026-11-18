@@ -118,7 +118,7 @@
               <t-checkbox v-model="form.prepareImmediately"
                 >创建后立即向目标设备下发准备命令</t-checkbox
               >
-              <span>设备只会缓存并校验考试档案，不会自动进入播放。</span>
+              <span>创建后可在考试详情设置无人值守计划。</span>
             </div>
             <div class="exam-create-footer">
               <t-space>
@@ -172,7 +172,7 @@ const form = reactive({
   name: '',
   deviceIds: [] as string[],
   partitionNodeIds: [] as string[],
-  prepareImmediately: true
+  prepareImmediately: false
 });
 const targetOptions = computed(() =>
   buildExamTargetCascaderOptions(dimensions.value, devices.value)

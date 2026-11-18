@@ -42,6 +42,7 @@ type DevicePlayerState = NonNullable<DeviceStateSnapshot['player']>
 export class ControlService {
   private readonly listeners = new Set<(event: ControlAgentEvent) => void>()
   private readonly preparedDeployments = new Map<string, PreparedDeployment>()
+  private readonly stoppedDeployments = new Set<string>()
   private readonly controlSessionByDeployment = new Map<string, string>()
   private readonly managedKeys = new Set<string>()
   private readonly managedValues = new Map<string, unknown>()
@@ -157,6 +158,9 @@ export class ControlService {
   async callProctor(
     input: { occurredAt: string } = { occurredAt: new Date().toISOString() }
   ): Promise<void> {
+    if (this.managedValues.get(MANAGED_SETTING_KEYS.playerShowCallProctor) === false) {
+      throw new ControlAgentError('proctor_call_disabled', '设备策略已关闭呼叫巡考')
+    }
     if (this.provider) {
       await this.provider.value.callProctor(input)
       return
@@ -248,6 +252,7 @@ export class ControlService {
   async prepareDeployment(
     payload: ExamConfigPrepareCommand['payload']
   ): Promise<DeviceStateSnapshot> {
+    this.assertDeploymentNotStopped(payload.deploymentId)
     const registration = this.getRegistration()
     if (!registration) {
       throw new ControlAgentError('device_not_enrolled', '设备尚未接入集控服务器')
@@ -281,6 +286,7 @@ export class ControlService {
       })
     }
 
+    this.assertDeploymentNotStopped(payload.deploymentId)
     this.preparedDeployments.set(payload.deploymentId, {
       deploymentId: payload.deploymentId,
       examConfigId: payload.examConfigId,
@@ -298,6 +304,7 @@ export class ControlService {
   async activateDeployment(
     payload: PlaybackActivateCommand['payload']
   ): Promise<DeviceStateSnapshot> {
+    this.assertDeploymentNotStopped(payload.deploymentId)
     const prepared = this.preparedDeployments.get(payload.deploymentId)
     if (!prepared) {
       throw new ControlAgentError('deployment_not_prepared', '集控考试尚未准备完成')
@@ -310,6 +317,10 @@ export class ControlService {
       { replaceExisting: true, origin: 'control', deploymentId: payload.deploymentId },
       { allowUserExit: () => !this.isControlSessionExitPrevented() }
     )
+    if (this.stoppedDeployments.has(payload.deploymentId)) {
+      await playerSessionService.close(session.id)
+      this.assertDeploymentNotStopped(payload.deploymentId)
+    }
     this.controlSessionByDeployment.set(payload.deploymentId, session.id)
     this.playerState = {
       status: PLAYER_STATUS.playing,
@@ -320,6 +331,10 @@ export class ControlService {
   }
 
   async stopDeployment(payload: PlaybackStopCommand['payload']): Promise<DeviceStateSnapshot> {
+    this.stoppedDeployments.add(payload.deploymentId)
+    if (this.stoppedDeployments.size > 1000) {
+      this.stoppedDeployments.delete(this.stoppedDeployments.values().next().value!)
+    }
     const prepared = this.preparedDeployments.get(payload.deploymentId)
     const sessionId = this.controlSessionByDeployment.get(payload.deploymentId)
     if (sessionId) await playerSessionService.close(sessionId)
@@ -331,6 +346,12 @@ export class ControlService {
       ...(prepared ? { examConfigVersionId: prepared.examConfigVersionId } : {})
     }
     return { player: { ...this.playerState } }
+  }
+
+  private assertDeploymentNotStopped(deploymentId: string): void {
+    if (this.stoppedDeployments.has(deploymentId)) {
+      throw new ControlAgentError('deployment_stopped', '该集控考试已停止')
+    }
   }
 
   emitBroadcast(payload: BroadcastShowCommand['payload']): void {

@@ -97,6 +97,17 @@ function createService(
   );
 }
 
+describe('scheduled client restart recovery', () => {
+  it('replays a live schedule after process restart but preserves normal reconnects', async () => {
+    const repository = { recoverScheduledDevice: vi.fn() };
+    const service = createService({} as never, repository as never);
+    await service.recoverScheduledDevice(deviceId, { player: { status: 'ready', deploymentId } });
+    expect(repository.recoverScheduledDevice).not.toHaveBeenCalled();
+    await service.recoverScheduledDevice(deviceId, {});
+    expect(repository.recoverScheduledDevice).toHaveBeenCalledWith(deviceId, expect.any(Date));
+  });
+});
+
 describe('ControlCommandsService command results', () => {
   it('commits the expired target state before rejecting a late result', async () => {
     let committed = false;

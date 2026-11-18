@@ -19,7 +19,7 @@
       :theme-id="themeIdSetting"
       :hdr-highlight="hdrHighlightSetting"
       :allow-exit="allowUserExit"
-      :show-call-proctor="isControlSession"
+      :show-call-proctor="isControlSession && settingsStore.get('player.showCallProctor', true)"
       :call-proctor-loading="callingProctor"
       @exit="handleExit"
       @room-number-click="handleRoomNumberClick"
@@ -369,7 +369,7 @@ const handleExamInfoLargeFontToggle = (enabled: boolean) => {
 }
 
 const handleCallProctor = async () => {
-  if (callingProctor.value) return
+  if (callingProctor.value || settingsStore.get('player.showCallProctor', true) === false) return
   callingProctor.value = true
   try {
     const snapshot = await window.api.control.getSnapshot()

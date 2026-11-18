@@ -98,6 +98,8 @@
         </t-col>
       </t-row>
 
+      <ExamAutomation :exam="exam" :can-write="canWrite" @changed="automationChanged" />
+
       <t-card class="exam-detail-workspace" :bordered="false">
         <t-tabs v-model="activeTab">
           <t-tab-panel value="schedule" label="考试安排" :destroy-on-hide="false">
@@ -373,6 +375,7 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import DeviceFilterPanel from '@/components/device-filter-panel/index.vue';
+import ExamAutomation from '@/components/exam-automation/index.vue';
 import PageHeader from '@/components/page-header/index.vue';
 import {
   applyDeviceConnectionStatus,
@@ -405,6 +408,12 @@ import {
 const route = useRoute();
 const session = useSessionStore();
 const canWrite = computed(() => ['admin', 'operator'].includes(session.user?.role ?? ''));
+const automationActive = ref(false);
+function automationChanged(active: boolean) {
+  const wasActive = automationActive.value;
+  automationActive.value = active;
+  if (active || wasActive) void refreshExamStatus(true);
+}
 const exam = ref<ExamConfigDetail>();
 const devices = ref<DeviceView[]>([]);
 const resolvedAssignedDevices = ref<DeviceView[]>([]);
@@ -458,16 +467,30 @@ const deployment = computed(() => {
   );
 });
 const canChangeDeployment = computed(
-  () => canWrite.value && !['preparing', 'active'].includes(exam.value?.status ?? 'draft')
+  () =>
+    canWrite.value &&
+    !automationActive.value &&
+    !['preparing', 'active'].includes(exam.value?.status ?? 'draft')
 );
 const canPrepare = computed(
-  () => canWrite.value && ['draft', 'completed'].includes(exam.value?.status ?? '')
+  () =>
+    canWrite.value &&
+    !automationActive.value &&
+    ['draft', 'completed'].includes(exam.value?.status ?? '')
 );
 const canActivate = computed(
-  () => canWrite.value && exam.value?.status === 'ready' && Boolean(deployment.value)
+  () =>
+    canWrite.value &&
+    !automationActive.value &&
+    exam.value?.status === 'ready' &&
+    Boolean(deployment.value)
 );
 const canStop = computed(
-  () => canWrite.value && exam.value?.status === 'active' && Boolean(deployment.value)
+  () =>
+    canWrite.value &&
+    !automationActive.value &&
+    exam.value?.status === 'active' &&
+    Boolean(deployment.value)
 );
 const assignedDevices = computed(() => resolvedAssignedDevices.value);
 const filteredAssignedDevices = computed(() =>
@@ -652,9 +675,13 @@ function startDeploymentPolling() {
   void refreshDeployment();
   deploymentTimer = setInterval(() => void refreshDeployment(), 1_000);
 }
-async function refreshExamStatus() {
+async function refreshExamStatus(force = false) {
   const current = exam.value;
-  if (!current || !['active', 'preparing'].includes(current.status) || examStatusRefreshInFlight) {
+  if (
+    !current ||
+    (!force && !['active', 'preparing'].includes(current.status)) ||
+    examStatusRefreshInFlight
+  ) {
     return;
   }
   examStatusRefreshInFlight = true;

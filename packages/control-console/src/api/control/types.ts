@@ -144,6 +144,21 @@ export interface ExamConfigDetail extends ExamConfigSummary {
   versions: ExamConfigVersion[];
 }
 
+export interface ExamAutomation {
+  id: string;
+  examConfigId: string;
+  version: number;
+  deviceIds: string[];
+  prepareAt: string;
+  startAt: string;
+  stopAt: string;
+  status: 'scheduled' | 'preparing' | 'active' | 'completed' | 'cancelled';
+  lastError: string | null;
+  preparedCount: number;
+  startedCount: number;
+  failedCount: number;
+}
+
 export interface PublicExamLinkResponse {
   token: string;
   examConfigId: string;

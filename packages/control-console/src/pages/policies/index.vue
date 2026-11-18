@@ -291,6 +291,7 @@ const SETTING_DEFINITIONS: Record<string, SettingDefinition> = {
     max: 1.8
   },
   [MANAGED_SETTING_KEYS.playerExamInfoLargeFont]: { label: '考试信息大字体', type: 'boolean' },
+  [MANAGED_SETTING_KEYS.playerShowCallProctor]: { label: '显示呼叫巡考按钮', type: 'boolean' },
   [MANAGED_SETTING_KEYS.playerPreventControlSessionExit]: {
     label: '禁止客户端主动退出集控放映',
     type: 'boolean'

@@ -3,6 +3,7 @@ import { and, count, desc, eq, gt, inArray, isNull, lte, sql } from 'drizzle-orm
 import { CONTROL_COMMAND_TYPES, type ControlCommand } from '@dsz-examaware/control-protocol';
 import type { DatabaseTransaction } from '../database/client.js';
 import { DatabaseService } from '../database/database.service.js';
+import { examAutomation } from './exam-automation.schema.js';
 import {
   COMMAND_TARGET_STATUS,
   controlCommand,
@@ -230,6 +231,71 @@ export class ControlCommandsRepository {
       )
       .returning({ commandId: controlCommandTarget.commandId });
     return [...new Set(rows.map((row) => row.commandId))];
+  }
+
+  async cancel(commandIds: string[]): Promise<void> {
+    if (!commandIds.length) return;
+    await this.databaseService.db
+      .update(controlCommand)
+      .set({ cancelledAt: new Date() })
+      .where(inArray(controlCommand.id, commandIds));
+  }
+
+  async recoverScheduledDevice(deviceId: string, now: Date): Promise<void> {
+    const plans = await this.databaseService.db
+      .select()
+      .from(examAutomation)
+      .where(
+        and(
+          inArray(examAutomation.status, ['preparing', 'active']),
+          lte(examAutomation.prepareAt, now),
+          gt(examAutomation.stopAt, now)
+        )
+      );
+    const ids = plans
+      .filter((plan) => plan.deviceIds.includes(deviceId))
+      .flatMap((plan) => [plan.id, plan.activationCommandIds[deviceId]!]);
+    if (!ids.length) return;
+    await this.databaseService.db
+      .update(controlCommandTarget)
+      .set({
+        status: COMMAND_TARGET_STATUS.pending,
+        deliveredAt: null,
+        acknowledgedAt: null,
+        completedAt: null,
+        errorCode: null,
+        errorMessage: null,
+        resultState: null
+      })
+      .where(
+        and(
+          eq(controlCommandTarget.deviceId, deviceId),
+          inArray(controlCommandTarget.commandId, ids),
+          inArray(controlCommandTarget.status, [
+            COMMAND_TARGET_STATUS.succeeded,
+            COMMAND_TARGET_STATUS.failed
+          ])
+        )
+      );
+  }
+
+  async retryFailed(commandId: string, now: Date): Promise<void> {
+    await this.databaseService.db
+      .update(controlCommandTarget)
+      .set({
+        status: COMMAND_TARGET_STATUS.pending,
+        completedAt: null,
+        errorCode: null,
+        errorMessage: null
+      })
+      .where(
+        and(
+          eq(controlCommandTarget.commandId, commandId),
+          eq(controlCommandTarget.status, COMMAND_TARGET_STATUS.failed),
+          lte(controlCommandTarget.completedAt, new Date(now.getTime() - 15_000)),
+          sql`coalesce(${controlCommandTarget.errorCode}, '') not like 'command_target_capabilities_%'`
+        )
+      );
   }
 
   async deviceIdsByStatus(commandId: string, statuses: CommandTargetStatus[]): Promise<string[]> {

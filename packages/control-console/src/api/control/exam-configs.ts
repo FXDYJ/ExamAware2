@@ -2,6 +2,7 @@ import type { ExamConfig } from '@dsz-examaware/core';
 import { apiRequest } from '../http';
 import type {
   ExamConfigDetail,
+  ExamAutomation,
   ExamConfigSummary,
   ExamConfigVersion,
   PageResponse,
@@ -11,6 +12,25 @@ import type {
 const EXAM_CONFIGS_PATH = '/api/v1/exam-configs';
 
 export const examConfigsApi = {
+  async getAutomation(id: string) {
+    const response = await apiRequest<{ plan: ExamAutomation | null }>(
+      `${EXAM_CONFIGS_PATH}/${encodeURIComponent(id)}/automation`
+    );
+    return response.plan;
+  },
+  saveAutomation(id: string, input: { prepareAt: string; startAt: string; stopAt: string }) {
+    return apiRequest<ExamAutomation>(`${EXAM_CONFIGS_PATH}/${encodeURIComponent(id)}/automation`, {
+      method: 'PUT',
+      body: JSON.stringify(input)
+    });
+  },
+  async cancelAutomation(id: string) {
+    const response = await apiRequest<{ plan: ExamAutomation | null }>(
+      `${EXAM_CONFIGS_PATH}/${encodeURIComponent(id)}/automation`,
+      { method: 'DELETE' }
+    );
+    return response.plan;
+  },
   list(page = 1, pageSize = 20) {
     const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
     return apiRequest<PageResponse<ExamConfigSummary>>(`${EXAM_CONFIGS_PATH}?${query}`);

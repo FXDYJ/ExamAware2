@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { configureApplication } from '../src/api/application.js';
 import { AppModule } from '../src/app.module.js';
 import { DatabaseService } from '../src/database/database.service.js';
+import { ExamAutomationService } from '../src/commands/exam-automation.service.js';
 
 import type { INestApplication } from '@nestjs/common';
 
@@ -18,6 +19,8 @@ beforeAll(async () => {
   })
     .overrideProvider(DatabaseService)
     .useValue(databaseService)
+    .overrideProvider(ExamAutomationService)
+    .useValue({})
     .compile();
   app = moduleRef.createNestApplication();
 

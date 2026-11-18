@@ -39,6 +39,7 @@ let devicesRepository: {
   recordHeartbeat: ReturnType<typeof vi.fn>;
 };
 let commandsService: {
+  recoverScheduledDevice: ReturnType<typeof vi.fn>;
   deliverPending: ReturnType<typeof vi.fn>;
   recordResult: ReturnType<typeof vi.fn>;
 };
@@ -108,6 +109,7 @@ beforeEach(async () => {
     recordHeartbeat: vi.fn().mockResolvedValue(undefined)
   };
   commandsService = {
+    recoverScheduledDevice: vi.fn().mockResolvedValue(undefined),
     deliverPending: vi.fn().mockResolvedValue(undefined),
     recordResult: vi.fn().mockResolvedValue(undefined)
   };
@@ -195,6 +197,7 @@ describe('DeviceGateway', () => {
       expect.any(Date)
     );
     expect(commandsService.deliverPending).toHaveBeenCalledWith(deviceId);
+    expect(commandsService.recoverScheduledDevice).toHaveBeenCalledWith(deviceId, hello.state);
     await vi.waitFor(() => {
       expect(operationsService.applyPolicySettings).toHaveBeenCalledWith(
         [],

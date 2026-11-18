@@ -211,6 +211,47 @@ describe('ControlService', () => {
     })
   })
 
+  it('blocks proctor calls when the managed button setting is disabled', async () => {
+    const agent = {
+      callProctor: vi.fn(),
+      getSnapshot: vi.fn(() => ({ state: 'online' })),
+      onChanged: vi.fn(() => () => {})
+    }
+    const service = new ControlService()
+    service.attach(agent as never, {} as never)
+    service.applyManagedSettings([
+      { key: MANAGED_SETTING_KEYS.playerShowCallProctor, value: false }
+    ])
+    await expect(service.callProctor()).rejects.toMatchObject({ code: 'proctor_call_disabled' })
+    expect(agent.callProctor).not.toHaveBeenCalled()
+    service.applyManagedSettings([{ key: MANAGED_SETTING_KEYS.playerShowCallProctor, value: true }])
+    await service.callProctor()
+    expect(agent.callProctor).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a delayed prepare after a scheduled stop', async () => {
+    const service = new ControlService()
+    await service.stopDeployment({ deploymentId })
+    await expect(
+      service.activateDeployment({ deploymentId, examConfigVersionId })
+    ).rejects.toMatchObject({ code: 'deployment_stopped' })
+    await expect(
+      service.prepareDeployment({
+        deploymentId,
+        examConfigId,
+        examConfigVersionId,
+        artifact: {
+          url: 'http://127.0.0.1:3100/artifact',
+          mediaType: EXAM_CONFIG_ARTIFACT_MEDIA_TYPE,
+          sizeBytes: 1,
+          sha256: 'a'.repeat(64),
+          expiresAt: '2030-01-01T00:00:00Z'
+        }
+      })
+    ).rejects.toMatchObject({ code: 'deployment_stopped' })
+    expect(state.start).not.toHaveBeenCalled()
+  })
+
   it('restores and enforces managed unbind and quit restrictions', async () => {
     state.loadManagedValues.mockResolvedValue({ 'control.preventQuit': true })
     const agent = {

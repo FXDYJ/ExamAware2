@@ -35,6 +35,7 @@ export const MANAGED_SETTING_KEYS = {
   playerLargeClockEnabled: 'player.largeClockEnabled',
   playerLargeClockScale: 'player.largeClockScale',
   playerExamInfoLargeFont: 'player.examInfoLargeFont',
+  playerShowCallProctor: 'player.showCallProctor',
   playerPreventControlSessionExit: 'player.preventControlSessionExit',
   controlPreventUnbind: 'control.preventUnbind',
   controlPreventQuit: 'control.preventQuit',
@@ -409,6 +410,9 @@ export const managedSettingSchema = z.discriminatedUnion('key', [
     .strict(),
   z
     .object({ key: z.literal(MANAGED_SETTING_KEYS.playerExamInfoLargeFont), value: z.boolean() })
+    .strict(),
+  z
+    .object({ key: z.literal(MANAGED_SETTING_KEYS.playerShowCallProctor), value: z.boolean() })
     .strict(),
   z
     .object({

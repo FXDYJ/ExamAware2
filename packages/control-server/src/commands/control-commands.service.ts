@@ -15,7 +15,11 @@ import {
   PLAYER_STATUS,
   createServerCommandMessage
 } from '@dsz-examaware/control-protocol';
-import type { CommandResult, ControlCommand } from '@dsz-examaware/control-protocol';
+import type {
+  CommandResult,
+  ControlCommand,
+  DeviceStateSnapshot
+} from '@dsz-examaware/control-protocol';
 import type { Page } from '../api/pagination.dto.js';
 import type { WriteContext } from '../api/write-context.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -207,6 +211,12 @@ export class ControlCommandsService {
     }
   }
 
+  async recoverScheduledDevice(deviceId: string, state: DeviceStateSnapshot = {}): Promise<void> {
+    // A fresh process has no prepared deployment. Normal reconnects retain that identity.
+    if (state.player?.deploymentId) return;
+    await this.commandsRepository.recoverScheduledDevice(deviceId, new Date());
+  }
+
   async recordResult(deviceId: string, result: CommandResult): Promise<CommandTargetRecord> {
     const command = await this.commandsRepository.findById(result.commandId);
     if (!command) {
@@ -311,7 +321,7 @@ export class ControlCommandsService {
     );
   }
 
-  private async resolveTargets(
+  async resolveTargets(
     selection: CommandTargetSelection,
     command: ControlCommand,
     validateTargetCapabilities: boolean
